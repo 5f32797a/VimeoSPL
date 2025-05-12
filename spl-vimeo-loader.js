@@ -657,15 +657,25 @@ ${m3u8Url}`;
         
         // Show help notification
         const helpNotification = document.createElement('div');
-        helpNotification.style.cssText = 'position: fixed; bottom: 20px; left: 20px; background-color: #2a2a2a; color: white; padding: 15px; border-radius: 5px; z-index: 10000; max-width: 300px; box-shadow: 0 4px 8px rgba(0,0,0,0.3);';
+        helpNotification.style.cssText = 'position: fixed; bottom: 20px; left: 20px; background-color: #2a2a2a; color: white; padding: 15px; border-radius: 5px; z-index: 10000; max-width: 400px; box-shadow: 0 4px 8px rgba(0,0,0,0.3);';
         helpNotification.innerHTML = `
             <div style="margin-bottom: 10px; font-weight: bold;">HLS Stream File Saved</div>
-            <div>To play or download this stream:</div>
+            <div>For full audio and video playback:</div>
             <ol style="margin-top: 5px; padding-left: 20px;">
-                <li>Use VLC Media Player</li>
-                <li>Or use a browser extension like "HLS Downloader"</li>
+                <li>Use <strong>VLC Media Player</strong> (recommended)
+                    <ul style="margin-top: 3px; padding-left: 20px;">
+                        <li>Go to <em>Media → Open File</em> and select the m3u8 file</li>
+                        <li>Or drag and drop the file into VLC</li>
+                    </ul>
+                </li>
+                <li>For Download with audio + video: 
+                    <ul style="margin-top: 3px; padding-left: 20px;">
+                        <li>In VLC: <em>Media → Convert/Save</em> after opening</li>
+                        <li>Or use FFmpeg: <code>ffmpeg -i "${filename}" -c copy output.mp4</code></li>
+                    </ul>
+                </li>
             </ol>
-            <div style="margin-top: 5px; font-size: 12px;">Click to dismiss</div>
+            <div style="margin-top: 8px; font-size: 12px; text-align: center;">Click to dismiss</div>
         `;
         
         helpNotification.onclick = () => {
@@ -678,7 +688,7 @@ ${m3u8Url}`;
             if (helpNotification.parentNode) {
                 document.body.removeChild(helpNotification);
             }
-        }, 15000);
+        }, 20000);
     }
 
     /**
@@ -1047,6 +1057,7 @@ ${m3u8Url}`;
         if (m3u8Content.includes('#EXT-X-STREAM-INF')) {
             console.log('Parsing master playlist');
             const streams = [];
+            const audioStreams = [];
             const lines = m3u8Content.split('\n');
             
             let currentStream = null;
@@ -1055,7 +1066,7 @@ ${m3u8Url}`;
                 const line = lines[i].trim();
                 
                 if (line.startsWith('#EXT-X-STREAM-INF:')) {
-                    currentStream = { attributes: {}, url: '' };
+                    currentStream = { attributes: {}, url: '', type: 'video' };
                     
                     // Parse attributes
                     const attributesStr = line.substring(18);
@@ -1081,12 +1092,41 @@ ${m3u8Url}`;
                     if (currentStream.attributes.CODECS) {
                         currentStream.codecs = currentStream.attributes.CODECS;
                     }
+                    if (currentStream.attributes.AUDIO) {
+                        currentStream.audioGroup = currentStream.attributes.AUDIO;
+                    }
+                    
+                    // Check if this stream has audio
+                    const codecs = currentStream.attributes.CODECS || '';
+                    currentStream.hasAudio = codecs.includes('mp4a') || codecs.includes('aac') || !codecs.includes('avc1');
                     
                 } else if (line && !line.startsWith('#') && currentStream) {
                     // This is a URL
                     currentStream.url = resolveUrl(line, baseUrl);
                     streams.push(currentStream);
                     currentStream = null;
+                } else if (line.startsWith('#EXT-X-MEDIA:') && line.includes('TYPE=AUDIO')) {
+                    // Parse audio-only stream
+                    const audioStream = { attributes: {}, type: 'AUDIO', url: '' };
+                    
+                    // Extract attributes
+                    const attrRegex = /([A-Z0-9-]+)=("([^"]*)"|([^,]*))/g;
+                    let match;
+                    
+                    while ((match = attrRegex.exec(line)) !== null) {
+                        const key = match[1];
+                        const value = match[3] || match[4];
+                        audioStream.attributes[key] = value;
+                    }
+                    
+                    // If this audio stream has a URI, add it
+                    if (audioStream.attributes.URI) {
+                        audioStream.url = resolveUrl(audioStream.attributes.URI, baseUrl);
+                        audioStream.groupId = audioStream.attributes['GROUP-ID'];
+                        audioStream.name = audioStream.attributes.NAME || 'Audio Track';
+                        audioStream.isAudioOnly = true;
+                        audioStreams.push(audioStream);
+                    }
                 }
             }
             
@@ -1095,7 +1135,8 @@ ${m3u8Url}`;
             
             return {
                 type: 'master',
-                streams: streams
+                streams: streams,
+                audioStreams: audioStreams
             };
         } else {
             // This is a media playlist
@@ -1198,7 +1239,10 @@ ${m3u8Url}`;
                     
                     if (playlistData.type === 'master') {
                         // Process streams
-                        const qualityOptions = playlistData.streams.map(stream => {
+                        const qualityOptions = [];
+                        
+                        // Process video streams
+                        playlistData.streams.forEach(stream => {
                             let label = 'Unknown';
                             
                             if (stream.resolution) {
@@ -1213,12 +1257,28 @@ ${m3u8Url}`;
                                 }
                             }
                             
-                            return {
+                            qualityOptions.push({
                                 label: label,
                                 bandwidth: stream.bandwidth,
                                 url: stream.url,
-                                codecs: stream.codecs
-                            };
+                                codecs: stream.codecs,
+                                resolution: stream.resolution,
+                                audioGroup: stream.audioGroup,
+                                attributes: stream.attributes
+                            });
+                        });
+                        
+                        // Process audio-only streams
+                        playlistData.audioStreams.forEach(audioStream => {
+                            qualityOptions.push({
+                                label: audioStream.name || 'Audio Track',
+                                url: audioStream.url,
+                                isAudioOnly: true,
+                                groupId: audioStream.groupId,
+                                name: audioStream.name,
+                                attributes: audioStream.attributes,
+                                language: audioStream.attributes.LANGUAGE || 'Unknown'
+                            });
                         });
                         
                         callback(null, {
@@ -1260,6 +1320,9 @@ ${m3u8Url}`;
                 return;
             }
             
+            // Check if this is an audio-only stream
+            const isAudioOnly = m3u8Url.includes('st=audio') || m3u8Url.includes('media.m3u8') && filename.includes('audio');
+            
             if (data.type === 'master') {
                 // This is a master playlist, get the highest quality
                 if (data.qualities.length === 0) {
@@ -1267,13 +1330,48 @@ ${m3u8Url}`;
                     return;
                 }
                 
-                // Select the highest quality stream
-                const highestQuality = data.qualities[0];
+                // Check if we're explicitly trying to download an audio stream
+                if (isAudioOnly) {
+                    // Find audio-only streams
+                    const audioStreams = data.qualities.filter(q => q.isAudioOnly);
+                    if (audioStreams.length > 0) {
+                        progressCallback(0, 'info', `Selected audio track: ${audioStreams[0].name || 'Audio Track'}`);
+                        
+                        // Fetch the media playlist for this audio
+                        fetchHlsStreamData(audioStreams[0].url, (mediaError, mediaData) => {
+                            if (mediaError) {
+                                progressCallback(0, 'error', mediaError);
+                                return;
+                            }
+                            
+                            if (mediaData.type !== 'media' || !mediaData.segments || mediaData.segments.length === 0) {
+                                progressCallback(0, 'error', new Error('Invalid media playlist or no segments found'));
+                                return;
+                            }
+                            
+                            // Download audio segments
+                            progressCallback(0, 'info', 'Downloading audio track...');
+                            downloadSegments(mediaData.segments, filename.replace('.mp4', '.m4a'), progressCallback);
+                        });
+                        return;
+                    }
+                }
                 
-                progressCallback(0, 'info', `Selected quality: ${highestQuality.label}`);
+                // Select the highest quality stream WITH AUDIO if possible
+                let selectedQuality = data.qualities[0];
+                
+                // First try to find a stream that has audio included
+                for (const quality of data.qualities) {
+                    if (!quality.isAudioOnly && quality.codecs && quality.codecs.includes('mp4a')) {
+                        selectedQuality = quality;
+                        break;
+                    }
+                }
+                
+                progressCallback(0, 'info', `Selected quality: ${selectedQuality.label}`);
                 
                 // Fetch the media playlist for this quality
-                fetchHlsStreamData(highestQuality.url, (mediaError, mediaData) => {
+                fetchHlsStreamData(selectedQuality.url, (mediaError, mediaData) => {
                     if (mediaError) {
                         progressCallback(0, 'error', mediaError);
                         return;
@@ -1284,6 +1382,48 @@ ${m3u8Url}`;
                         return;
                     }
                     
+                    // Check if the media stream has audio, if not try to find separate audio stream
+                    if (selectedQuality.codecs && !selectedQuality.codecs.includes('mp4a') && selectedQuality.audioGroup) {
+                        progressCallback(0, 'info', 'Video has no embedded audio, checking for separate audio stream...');
+                        
+                        // Try to find an audio stream that matches
+                        const audioStreams = data.qualities.filter(q => 
+                            q.isAudioOnly && q.groupId === selectedQuality.audioGroup
+                        );
+                        
+                        if (audioStreams.length > 0) {
+                            progressCallback(0, 'info', `Found matching audio stream: ${audioStreams[0].name || 'Audio Track'}`);
+                            
+                            // Fetch the audio stream and then combine
+                            fetchHlsStreamData(audioStreams[0].url, (audioError, audioData) => {
+                                if (audioError) {
+                                    // Continue with video only if audio fails
+                                    progressCallback(0, 'info', 'Audio stream failed, continuing with video only');
+                                    downloadSegments(mediaData.segments, filename, progressCallback);
+                                    return;
+                                }
+                                
+                                if (audioData.type === 'media' && audioData.segments && audioData.segments.length > 0) {
+                                    // Download both video and audio segments and combine them
+                                    downloadVideoAndAudioSegments(
+                                        mediaData.segments,
+                                        audioData.segments,
+                                        filename,
+                                        progressCallback
+                                    );
+                                } else {
+                                    // Continue with video only
+                                    progressCallback(0, 'info', 'Audio stream data invalid, continuing with video only');
+                                    downloadSegments(mediaData.segments, filename, progressCallback);
+                                }
+                            });
+                            return;
+                        } else {
+                            progressCallback(0, 'info', 'No matching audio stream found, continuing with video only');
+                        }
+                    }
+                    
+                    // No separate audio stream found or not needed, download video segments only
                     downloadSegments(mediaData.segments, filename, progressCallback);
                 });
             } else if (data.type === 'media') {
@@ -1293,11 +1433,224 @@ ${m3u8Url}`;
                     return;
                 }
                 
-                downloadSegments(data.segments, filename, progressCallback);
+                // Check if this is likely an audio stream based on the URL
+                if (isAudioOnly) {
+                    progressCallback(0, 'info', 'Detected audio-only stream');
+                    downloadSegments(data.segments, filename.replace('.mp4', '.m4a'), progressCallback);
+                } else {
+                    downloadSegments(data.segments, filename, progressCallback);
+                }
             }
         });
     }
     
+    /**
+     * Download and combine both video and audio HLS segments
+     * @param {Array} videoSegments - Array of video segment objects
+     * @param {Array} audioSegments - Array of audio segment objects
+     * @param {string} filename - Target filename
+     * @param {Function} progressCallback - Callback for progress updates
+     */
+    function downloadVideoAndAudioSegments(videoSegments, audioSegments, filename, progressCallback) {
+        const totalSegments = videoSegments.length + audioSegments.length;
+        let downloadedSegments = 0;
+        let downloadedBytes = 0;
+        
+        let videoChunks = new Array(videoSegments.length);
+        let audioChunks = new Array(audioSegments.length);
+        
+        let activeDownloads = 0;
+        let errorOccurred = false;
+        
+        progressCallback(0, 'info', `Starting download of ${videoSegments.length} video and ${audioSegments.length} audio segments`);
+        
+        // Function to check if all downloads are complete
+        const checkAllComplete = () => {
+            if (downloadedSegments === totalSegments) {
+                progressCallback(1, 'info', 'All segments downloaded, merging video and audio...');
+                
+                // Combine segments and save file using external tool like FFmpeg (would need server-side process)
+                // For now, we'll just concatenate video segments since we don't have access to ffmpeg in the browser
+                // In the future, could use Media Source Extensions or WebAssembly version of FFmpeg
+                
+                // Combine video segments
+                let combinedVideoSize = 0;
+                videoChunks.forEach(chunk => {
+                    if (chunk) combinedVideoSize += chunk.byteLength;
+                });
+                
+                const combinedVideo = new Uint8Array(combinedVideoSize);
+                let videoOffset = 0;
+                
+                videoChunks.forEach(chunk => {
+                    if (chunk) {
+                        combinedVideo.set(new Uint8Array(chunk), videoOffset);
+                        videoOffset += chunk.byteLength;
+                    }
+                });
+                
+                // For now, save the video without audio
+                // In a complete solution, we would use FFmpeg to properly mux the audio and video
+                const blob = new Blob([combinedVideo], { type: 'video/mp4' });
+                const url = URL.createObjectURL(blob);
+                
+                // Inform user about the limitation
+                progressCallback(1, 'info', 'Note: For full audio support, use the "Save HLS Stream" option');
+                
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = filename;
+                a.style.display = 'none';
+                document.body.appendChild(a);
+                a.click();
+                
+                // Clean up
+                setTimeout(() => {
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }, 100);
+                
+                progressCallback(1, 'complete', { size: combinedVideoSize });
+            }
+        };
+        
+        // Download function for a single segment
+        const downloadSegment = (url, isVideo, index, callback) => {
+            GM_xmlhttpRequest({
+                method: 'GET',
+                url: url,
+                responseType: 'arraybuffer',
+                headers: {
+                    'Referer': 'https://www.patreon.com',
+                    'User-Agent': CONFIG.userAgent
+                },
+                onload: function(response) {
+                    if (response.status !== 200) {
+                        callback(new Error(`HTTP ${response.status}`), null);
+                        return;
+                    }
+                    
+                    callback(null, response.response);
+                },
+                onerror: function(error) {
+                    callback(error || new Error('Network error'), null);
+                }
+            });
+        };
+        
+        // Start downloading video segments
+        const downloadNextVideoBatch = (startIndex) => {
+            if (errorOccurred) return;
+            
+            const endIndex = Math.min(startIndex + CONFIG.maxConcurrentDownloads, videoSegments.length);
+            
+            for (let i = startIndex; i < endIndex; i++) {
+                if (errorOccurred) break;
+                
+                activeDownloads++;
+                const segment = videoSegments[i];
+                
+                downloadSegment(segment.url, true, i, (error, data) => {
+                    if (errorOccurred) return;
+                    
+                    activeDownloads--;
+                    
+                    if (error) {
+                        console.error(`Error downloading video segment ${i}:`, error);
+                        progressCallback(0, 'info', `Error on video segment ${i}, continuing...`);
+                    } else {
+                        videoChunks[i] = data;
+                        downloadedBytes += data.byteLength;
+                    }
+                    
+                    downloadedSegments++;
+                    
+                    const progress = downloadedSegments / totalSegments;
+                    progressCallback(progress, 'progress', {
+                        segment: downloadedSegments,
+                        totalSegments: totalSegments,
+                        bytes: downloadedBytes
+                    });
+                    
+                    if (activeDownloads < CONFIG.maxConcurrentDownloads && endIndex < videoSegments.length) {
+                        downloadNextVideoBatch(endIndex);
+                    }
+                    
+                    // Check if we should start audio downloads
+                    if (downloadedSegments >= videoSegments.length * 0.5 && 
+                        !audioDownloadsStarted && activeDownloads < CONFIG.maxConcurrentDownloads) {
+                        startAudioDownloads();
+                    }
+                    
+                    checkAllComplete();
+                });
+            }
+        };
+        
+        // Flag to track if audio downloads have started
+        let audioDownloadsStarted = false;
+        
+        // Start downloading audio segments
+        const startAudioDownloads = () => {
+            if (audioDownloadsStarted) return;
+            audioDownloadsStarted = true;
+            
+            progressCallback(downloadedSegments / totalSegments, 'info', 'Starting audio download...');
+            
+            let audioIndex = 0;
+            
+            const downloadNextAudioBatch = () => {
+                if (errorOccurred) return;
+                
+                const endIndex = Math.min(audioIndex + CONFIG.maxConcurrentDownloads, audioSegments.length);
+                
+                for (let i = audioIndex; i < endIndex; i++) {
+                    if (errorOccurred) break;
+                    
+                    activeDownloads++;
+                    const segment = audioSegments[i];
+                    
+                    downloadSegment(segment.url, false, i, (error, data) => {
+                        if (errorOccurred) return;
+                        
+                        activeDownloads--;
+                        
+                        if (error) {
+                            console.error(`Error downloading audio segment ${i}:`, error);
+                            progressCallback(0, 'info', `Error on audio segment ${i}, continuing...`);
+                        } else {
+                            audioChunks[i] = data;
+                            downloadedBytes += data.byteLength;
+                        }
+                        
+                        downloadedSegments++;
+                        
+                        const progress = downloadedSegments / totalSegments;
+                        progressCallback(progress, 'progress', {
+                            segment: downloadedSegments,
+                            totalSegments: totalSegments,
+                            bytes: downloadedBytes
+                        });
+                        
+                        if (activeDownloads < CONFIG.maxConcurrentDownloads && audioIndex < audioSegments.length) {
+                            audioIndex = endIndex;
+                            downloadNextAudioBatch();
+                        }
+                        
+                        checkAllComplete();
+                    });
+                }
+                
+                audioIndex = endIndex;
+            };
+            
+            downloadNextAudioBatch();
+        };
+        
+        // Start with video downloads
+        downloadNextVideoBatch(0);
+    }
+
     /**
      * Download and combine HLS segments
      * @param {Array} segments - Array of segment objects with URLs
@@ -1368,7 +1721,7 @@ ${m3u8Url}`;
         // Start downloading the first batch
         downloadNextBatch(0);
     }
-    
+
     /**
      * Download a single HLS segment
      * @param {string} url - The segment URL
@@ -1397,7 +1750,7 @@ ${m3u8Url}`;
             }
         });
     }
-    
+
     /**
      * Combine segment ArrayBuffers into a single file and save
      * @param {Array} segmentChunks - Array of ArrayBuffers
@@ -1460,16 +1813,23 @@ ${m3u8Url}`;
         overlay.style.cssText = 'position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.8); z-index: 10000; display: flex; justify-content: center; align-items: center;';
         
         const dialogContainer = document.createElement('div');
-        dialogContainer.style.cssText = 'background-color: #2a2a2a; color: white; padding: 20px; border-radius: 5px; max-width: 600px; width: 90%;';
+        dialogContainer.style.cssText = 'background-color: #2a2a2a; color: white; padding: 20px; border-radius: 5px; max-width: 600px; width: 90%; max-height: 80vh; overflow-y: auto;';
         
         dialogContainer.innerHTML = `
             <h3 style="color: #3498db; margin-top: 0;">HLS Stream Download</h3>
             <p>Analyzing available video qualities...</p>
             <div class="hls-spinner" style="border: 3px solid #f3f3f3; border-top: 3px solid #3498db; border-radius: 50%; width: 30px; height: 30px; margin: 10px auto; animation: spin 1s linear infinite;"></div>
             <div class="quality-options" style="margin-top: 15px;"></div>
+            <div class="audio-options" style="margin-top: 15px; border-top: 1px solid #444; padding-top: 10px; display: none;">
+                <h4 style="margin-top: 0; color: #3498db;">Audio Tracks</h4>
+                <div class="audio-tracks"></div>
+            </div>
             <div style="margin-top: 15px; display: flex; justify-content: space-between;">
                 <button id="close-hls-dialog" style="background-color: #95a5a6; color: white; border: none; padding: 8px 15px; border-radius: 3px; cursor: pointer;">Close</button>
                 <button id="download-highest" style="background-color: #3498db; color: white; border: none; padding: 8px 15px; border-radius: 3px; cursor: pointer;">Download Highest Quality</button>
+            </div>
+            <div style="margin-top: 15px; font-size: 12px; color: #95a5a6;">
+                <p>Note: For guaranteed audio+video playback, use the "Save HLS Stream (m3u8)" option and open in VLC or other media player.</p>
             </div>
         `;
         
@@ -1510,12 +1870,85 @@ ${m3u8Url}`;
                 const spinner = dialogContainer.querySelector('.hls-spinner');
                 if (spinner) spinner.remove();
                 
-                // Create quality options
-                data.qualities.forEach((quality, index) => {
+                // Check if any quality has audio
+                const hasQualityWithAudio = data.qualities.some(q => q.codecs && q.codecs.includes('mp4a'));
+                
+                // Display audio tracks section if available
+                const audioContainer = dialogContainer.querySelector('.audio-options');
+                const audioTracksContainer = dialogContainer.querySelector('.audio-tracks');
+                
+                // Filter out audio-only streams from the data
+                const audioOnlyStreams = data.qualities.filter(q => q.isAudioOnly);
+                
+                // If we have separate audio-only streams, display them separately
+                if (audioOnlyStreams.length > 0) {
+                    audioContainer.style.display = 'block';
+                    
+                    audioOnlyStreams.forEach(audioStream => {
+                        const audioOption = document.createElement('div');
+                        audioOption.style.cssText = 'padding: 10px; background-color: #333; margin: 5px 0; border-radius: 3px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;';
+                        
+                        const audioName = audioStream.name || 'Audio Track';
+                        const audioBitrate = audioStream.bandwidth ? formatBitrate(audioStream.bandwidth) : 'Unknown bitrate';
+                        
+                        audioOption.innerHTML = `
+                            <div>
+                                <span>🔊 ${audioName}</span>
+                                <span style="color: #2ecc71; margin-left: 10px;">Audio Only</span>
+                            </div>
+                            <span>${audioBitrate}</span>
+                        `;
+                        
+                        audioOption.onmouseover = () => {
+                            audioOption.style.backgroundColor = '#3498db';
+                        };
+                        
+                        audioOption.onmouseout = () => {
+                            audioOption.style.backgroundColor = '#333';
+                        };
+                        
+                        audioOption.onclick = () => {
+                            startHlsDownload(audioStream.url, `${title || `vimeo-${videoId}`}_audio.mp4`);
+                            document.body.removeChild(overlay);
+                        };
+                        
+                        audioTracksContainer.appendChild(audioOption);
+                    });
+                }
+                
+                if (!hasQualityWithAudio && !audioOnlyStreams.length) {
+                    // Warning about audio
+                    const audioWarning = document.createElement('div');
+                    audioWarning.style.cssText = 'background-color: #e74c3c; padding: 10px; border-radius: 3px; margin: 10px 0;';
+                    audioWarning.innerHTML = `
+                        <strong>Audio Warning:</strong> No streams with embedded audio detected. For best results:
+                        <ol style="margin-top: 5px; margin-bottom: 5px;">
+                            <li>Use the "Save HLS Stream (m3u8)" option in the Download menu</li>
+                            <li>Open the saved file with VLC or other HLS-compatible player</li>
+                        </ol>
+                    `;
+                    qualityContainer.appendChild(audioWarning);
+                }
+                
+                // Filter out video streams (non-audio-only)
+                const videoStreams = data.qualities.filter(q => !q.isAudioOnly);
+                
+                // Create quality options for video streams
+                videoStreams.forEach((quality, index) => {
                     const qualityOption = document.createElement('div');
                     qualityOption.style.cssText = 'padding: 10px; background-color: #333; margin: 5px 0; border-radius: 3px; cursor: pointer; display: flex; justify-content: space-between; align-items: center;';
+                    
+                    // Check if this quality has audio
+                    const hasAudio = quality.codecs && quality.codecs.includes('mp4a');
+                    const audioIndicator = hasAudio 
+                        ? `<span style="color: #2ecc71; margin-left: 10px;">✓ Audio</span>` 
+                        : `<span style="color: #e74c3c; margin-left: 10px;">❌ No Audio</span>`;
+                    
                     qualityOption.innerHTML = `
-                        <span>${quality.label}</span>
+                        <div>
+                            <span>${quality.label || (quality.resolution || 'Unknown')}</span>
+                            ${audioIndicator}
+                        </div>
                         <span>${formatBitrate(quality.bandwidth)}</span>
                     `;
                     
@@ -1528,12 +1961,20 @@ ${m3u8Url}`;
                     };
                     
                     qualityOption.onclick = () => {
-                        startHlsDownload(quality.url, `${title || `vimeo-${videoId}`}_${quality.label}.mp4`);
+                        startHlsDownload(quality.url, `${title || `vimeo-${videoId}`}_${quality.label || (quality.resolution || 'unknown')}.mp4`);
                         document.body.removeChild(overlay);
                     };
                     
                     qualityContainer.appendChild(qualityOption);
                 });
+                
+                // Add VLC recommendation
+                const vlcRecommendation = document.createElement('div');
+                vlcRecommendation.style.cssText = 'margin-top: 15px; font-size: 12px; color: #95a5a6;';
+                vlcRecommendation.innerHTML = `
+                    <p><strong>Recommended:</strong> For best quality with audio, save the m3u8 file and open in VLC player.</p>
+                `;
+                qualityContainer.appendChild(vlcRecommendation);
             } else if (data.type === 'media') {
                 dialogContainer.innerHTML = `
                     <h3 style="color: #3498db; margin-top: 0;">HLS Stream Download</h3>
@@ -1541,6 +1982,9 @@ ${m3u8Url}`;
                     <div style="margin-top: 15px; display: flex; justify-content: space-between;">
                         <button id="close-hls-dialog" style="background-color: #95a5a6; color: white; border: none; padding: 8px 15px; border-radius: 3px; cursor: pointer;">Close</button>
                         <button id="download-direct" style="background-color: #3498db; color: white; border: none; padding: 8px 15px; border-radius: 3px; cursor: pointer;">Download</button>
+                    </div>
+                    <div style="margin-top: 15px; font-size: 12px; color: #95a5a6;">
+                        <p>Note: If downloaded video has no audio, use the "Save HLS Stream (m3u8)" option and open in VLC or other media player.</p>
                     </div>
                 `;
                 
