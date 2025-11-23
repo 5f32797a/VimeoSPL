@@ -1,1526 +1,543 @@
 // ==UserScript==
-// @name         SPL (SimplePatreonLoader) - Optimized
+// @name         Vimeo SPL: v4.0 (Modern UI)
 // @namespace    https://github.com/5f32797a
-// @version      3.0
-// @description  Enhanced Vimeo video loader with optimized performance, better architecture, and improved HLS download
+// @version      4.0
+// @description  VimeoSPL: Replaces embedded player with a modern HLS interface, allowing separate high-quality video/audio downloads.
 // @match        https://vimeo.com/*
+// @match        https://player.vimeo.com/*
 // @grant        GM_xmlhttpRequest
-// @grant        GM_setValue
-// @grant        GM_getValue
-// @grant        GM_download
-// @connect      vimeo.com
-// @connect      *.vimeocdn.com
-// @source       https://github.com/5f32797a/VimeoSPL
-// @supportURL   https://github.com/5f32797a/VimeoSPL/issues
+// @require      https://cdn.jsdelivr.net/npm/hls.js@latest
 // @run-at       document-idle
 // ==/UserScript==
 
-(function() {
+(function () {
     'use strict';
 
-    /**
-     * Application Configuration Manager
-     */
-    class ConfigManager {
-        static defaults = {
-            preferredQuality: 'auto',
-            darkMode: true,
-            loadTimeout: 60000,
-            userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            maxConcurrentDownloads: 4,
-            chunkSize: 4 * 1024 * 1024,
-            retryAttempts: 3,
-            retryDelay: 1000,
-            debugMode: false
-        };
+    /* ==========================================================================
+       1. ICONS & STYLES
+       ========================================================================== */
+    const ICONS = {
+        play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>',
+        pause: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>',
+        volumeHigh: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/></svg>',
+        volumeMute: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/></svg>',
+        download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+        fullscreen: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>',
+        video: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 7l-7 5 7 5V7z"/><rect x="1" y="5" width="15" height="14" rx="2" ry="2"/></svg>',
+        audio: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>',
+        spinner: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83"/></svg>'
+    };
 
-        static get(key) {
-            return GM_getValue(key, this.defaults[key]);
-        }
+    const css = `
+        :root { --spl-primary: #00adef; --spl-bg: #121212; --spl-surface: #1e1e1e; --spl-text: #ffffff; }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
 
-        static set(key, value) {
-            GM_setValue(key, value);
-        }
+        .spl-wrap * { box-sizing: border-box; font-family: 'Inter', sans-serif; -webkit-font-smoothing: antialiased; }
+        .spl-wrap { position: fixed; inset: 0; background: #000; z-index: 99999; color: var(--spl-text); overflow: hidden; user-select: none; }
 
-        static getAll() {
-            const config = {};
-            Object.keys(this.defaults).forEach(key => {
-                config[key] = this.get(key);
-            });
-            return config;
-        }
+        /* Video Element */
+        .spl-video { width: 100%; height: 100%; object-fit: contain; outline: none; }
+
+        /* Overlay & Center Controls */
+        .spl-layer { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: flex-end; background: linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 30%, rgba(0,0,0,0) 100%); transition: opacity 0.3s ease; pointer-events: none; }
+        .spl-layer.fade-out { opacity: 0; }
+        .spl-center-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; pointer-events: auto; cursor: pointer; }
+        .spl-big-play { width: 70px; height: 70px; background: rgba(0,0,0,0.6); border-radius: 50%; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px); opacity: 0; transform: scale(0.8); transition: 0.2s; pointer-events: none; }
+        .spl-big-play svg { width: 36px; height: 36px; margin-left: 4px; } /* center play icon visually */
+        .spl-spinner { animation: spl-spin 1s linear infinite; display: none; }
+        @keyframes spl-spin { 100% { transform: rotate(360deg); } }
+
+        /* Controls Bar */
+        .spl-controls { padding: 0 24px 24px; pointer-events: auto; display: flex; flex-direction: column; gap: 12px; width: 100%; max-width: 1280px; margin: 0 auto; }
+
+        /* Progress Bar */
+        .spl-prog-container { height: 14px; display: flex; align-items: center; cursor: pointer; position: relative; group: true; }
+        .spl-prog-bg { width: 100%; height: 4px; background: rgba(255,255,255,0.2); border-radius: 2px; position: relative; transition: height 0.1s; overflow: hidden; }
+        .spl-prog-container:hover .spl-prog-bg { height: 6px; }
+        .spl-prog-buf { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(255,255,255,0.3); width: 0; transition: width 0.2s; }
+        .spl-prog-fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--spl-primary); width: 0; transition: width 0.1s linear; box-shadow: 0 0 10px rgba(0,173,239,0.5); }
+
+        /* Bottom Bar Buttons */
+        .spl-bar { display: flex; justify-content: space-between; align-items: center; height: 40px; }
+        .spl-grp { display: flex; align-items: center; gap: 10px; }
+
+        .spl-btn { background: none; border: none; color: #eee; cursor: pointer; width: 36px; height: 36px; border-radius: 8px; display: flex; align-items: center; justify-content: center; transition: 0.2s; position: relative; }
+        .spl-btn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+        .spl-btn svg { width: 22px; height: 22px; }
+
+        /* Volume Slider */
+        .spl-vol-wrap { display: flex; align-items: center; width: 36px; transition: width 0.3s ease; overflow: hidden; background: rgba(255,255,255,0); border-radius: 20px; margin-right: 8px; }
+        .spl-vol-wrap:hover, .spl-vol-wrap.active { width: 140px; background: rgba(255,255,255,0.1); }
+        .spl-vol-slider { width: 0; opacity: 0; margin: 0; height: 4px; appearance: none; background: rgba(255,255,255,0.3); border-radius: 2px; outline: none; transition: 0.2s; cursor: pointer; margin-left: 8px; flex-grow: 1; margin-right: 12px; }
+        .spl-vol-wrap:hover .spl-vol-slider, .spl-vol-wrap.active .spl-vol-slider { width: 80px; opacity: 1; }
+        .spl-vol-slider::-webkit-slider-thumb { appearance: none; width: 12px; height: 12px; background: #fff; border-radius: 50%; cursor: pointer; }
+
+        /* Time Display */
+        .spl-time { font-size: 13px; font-weight: 500; color: #ddd; margin-left: 4px; font-variant-numeric: tabular-nums; }
+
+        /* Modal (Modern) */
+        .spl-modal-bg { position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 100000; backdrop-filter: blur(8px); display: none; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s; }
+        .spl-modal-bg.open { opacity: 1; }
+        .spl-modal { background: var(--spl-surface); width: 90%; max-width: 400px; border-radius: 16px; border: 1px solid rgba(255,255,255,0.08); box-shadow: 0 20px 40px rgba(0,0,0,0.6); display: flex; flex-direction: column; max-height: 80vh; transform: scale(0.95); transition: transform 0.2s; overflow: hidden; }
+        .spl-modal-bg.open .spl-modal { transform: scale(1); }
+
+        .spl-modal-header { padding: 18px 20px; border-bottom: 1px solid rgba(255,255,255,0.08); display: flex; justify-content: space-between; align-items: center; }
+        .spl-modal-title { font-weight: 600; font-size: 16px; }
+        .spl-close-btn { background: none; border: none; color: #888; cursor: pointer; font-size: 20px; line-height: 1; padding: 4px; }
+        .spl-close-btn:hover { color: #fff; }
+
+        .spl-list { overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+        .spl-section-title { font-size: 11px; text-transform: uppercase; color: #666; font-weight: 700; letter-spacing: 0.5px; margin: 10px 10px 4px; }
+
+        .spl-item { display: flex; align-items: center; justify-content: space-between; padding: 12px 16px; border-radius: 10px; cursor: pointer; transition: 0.2s; background: rgba(255,255,255,0.03); border: 1px solid transparent; }
+        .spl-item:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.1); transform: translateX(2px); }
+        .spl-item-left { display: flex; align-items: center; gap: 12px; }
+        .spl-res-badge { font-weight: 700; font-size: 13px; background: #333; padding: 2px 6px; border-radius: 4px; color: #eee; min-width: 50px; text-align: center; }
+        .spl-item-info { display: flex; flex-direction: column; gap: 2px; }
+        .spl-meta { font-size: 12px; color: #888; }
+
+        /* Download Progress State */
+        .spl-dl-state { padding: 40px 30px; text-align: center; display: none; flex-direction: column; align-items: center; gap: 15px; }
+        .spl-dl-bar-bg { width: 100%; height: 8px; background: #333; border-radius: 4px; overflow: hidden; margin-top: 10px; }
+        .spl-dl-bar-fill { height: 100%; width: 0%; background: var(--spl-primary); transition: width 0.2s; border-radius: 4px; }
+        .spl-status-text { font-size: 13px; color: #aaa; font-family: monospace; }
+
+        /* Toast Notification */
+        .spl-toast { position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%) translateY(20px); background: rgba(20,20,20,0.9); backdrop-filter: blur(5px); border: 1px solid rgba(255,255,255,0.1); padding: 10px 20px; border-radius: 30px; font-size: 13px; font-weight: 500; opacity: 0; transition: 0.3s; pointer-events: none; z-index: 100001; box-shadow: 0 10px 20px rgba(0,0,0,0.3); }
+        .spl-toast.show { transform: translateX(-50%) translateY(0); opacity: 1; }
+    `;
+    document.head.appendChild(document.createElement('style')).textContent = css;
+
+    /* ==========================================================================
+       2. HELPER FUNCTIONS
+       ========================================================================== */
+    function formatTime(seconds) {
+        if (isNaN(seconds)) return "0:00";
+        const m = Math.floor(seconds / 60);
+        const s = Math.floor(seconds % 60);
+        return `${m}:${s < 10 ? '0' : ''}${s}`;
     }
 
-    /**
-     * Optimized Logging Utility
-     */
-    class Logger {
-        static levels = { ERROR: 0, WARN: 1, INFO: 2, DEBUG: 3 };
-        static currentLevel = ConfigManager.get('debugMode') ? 3 : 2;
-
-        static log(level, message, ...args) {
-            if (this.levels[level] <= this.currentLevel) {
-                const timestamp = new Date().toISOString();
-                console[level.toLowerCase()](`[SPL ${timestamp}] ${message}`, ...args);
-            }
-        }
-
-        static error(message, ...args) { this.log('ERROR', message, ...args); }
-        static warn(message, ...args) { this.log('WARN', message, ...args); }
-        static info(message, ...args) { this.log('INFO', message, ...args); }
-        static debug(message, ...args) { this.log('DEBUG', message, ...args); }
+    function extractVimeoVideoId(path) {
+        const match = path.match(/^\/(?:[a-zA-Z0-9]+\/)?(\d+)/);
+        return match ? match[1] : null;
     }
 
-    /**
-     * Utility Functions
-     */
-    class Utils {
-        static formatBytes(bytes) {
-            if (bytes === 0) return '0 Bytes';
-            const k = 1024;
-            const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return `${(bytes / Math.pow(k, i)).toFixed(2)} ${sizes[i]}`;
+    function extractVimeoConfig(html) {
+        const start = html.indexOf('window.playerConfig = ');
+        if (start === -1) throw new Error('playerConfig not found.');
+        const jsonStart = html.indexOf('{', start);
+        let brace = 1, i = jsonStart + 1;
+        for (; i < html.length && brace > 0; i++) {
+            if (html[i] === '{') brace++;
+            else if (html[i] === '}') brace--;
         }
-
-        static formatBitrate(bitrate) {
-            if (!bitrate) return '';
-            return bitrate >= 1000000 
-                ? `${(bitrate / 1000000).toFixed(1)} Mbps`
-                : `${Math.round(bitrate / 1000)} Kbps`;
-        }
-
-        static debounce(func, wait) {
-            let timeout;
-            return function executedFunction(...args) {
-                const later = () => {
-                    clearTimeout(timeout);
-                    func(...args);
-                };
-                clearTimeout(timeout);
-                timeout = setTimeout(later, wait);
-            };
-        }
-
-        static sanitizeFilename(filename) {
-            return filename.replace(/[<>:"/\\|?*]/g, '_').trim();
-        }
-
-        static async sleep(ms) {
-            return new Promise(resolve => setTimeout(resolve, ms));
-        }
-
-        static createUUID() {
-            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-                const r = Math.random() * 16 | 0;
-                const v = c === 'x' ? r : (r & 0x3 | 0x8);
-                return v.toString(16);
-            });
-        }
+        return JSON.parse(html.substring(jsonStart, i));
     }
 
-    /**
-     * Enhanced URL Parser
-     */
-    class URLParser {
-        static VIMEO_ID_PATTERNS = [
-            /vimeo\.com\/(\d+)/,
-            /player\.vimeo\.com\/video\/(\d+)/,
-            /vimeo\.com\/video\/(\d+)/,
-            /\/(\d+)(?:[/?#]|$)/
-        ];
-
-        static extractVideoId(url) {
-            for (const pattern of this.VIMEO_ID_PATTERNS) {
-                const match = url.match(pattern);
-                if (match) return match[1];
-            }
-            throw new Error('Invalid Vimeo URL format');
-        }
-
-        static resolveUrl(url, base) {
-            if (url.startsWith('http')) return url;
-            
-            try {
-                return new URL(url, base).href;
-            } catch {
-                // Fallback for complex relative paths
-                if (url.startsWith('/')) {
-                    const baseUrl = new URL(base);
-                    return `${baseUrl.protocol}//${baseUrl.host}${url}`;
-                }
-                const lastSlash = base.lastIndexOf('/');
-                return base.substring(0, lastSlash + 1) + url;
-            }
-        }
-    }
-
-    /**
-     * CSS Style Manager
-     */
-    class StyleManager {
-        static styles = `
-            @keyframes spl-spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-            @keyframes spl-fadeIn { from { opacity: 0; } to { opacity: 1; } }
-            @keyframes spl-slideIn { from { transform: translateY(-20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-            
-            .spl-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 9998; }
-            .spl-container { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 9999; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
-            .spl-spinner { border: 4px solid #f3f3f3; border-top: 4px solid #3498db; border-radius: 50%; width: 40px; height: 40px; animation: spl-spin 1s linear infinite; margin: 0 auto 15px; }
-            .spl-fade-in { animation: spl-fadeIn 0.5s ease-out; }
-            .spl-slide-in { animation: spl-slideIn 0.3s ease-out; }
-            
-            .spl-player { position: fixed; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; background: #1a1a1a; }
-            .spl-controls { display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background: linear-gradient(135deg, #2c3e50, #34495e); color: white; box-shadow: 0 2px 10px rgba(0,0,0,0.3); }
-            .spl-title { flex: 1; font-weight: 600; font-size: 16px; margin-right: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-            .spl-button-group { display: flex; gap: 8px; }
-            .spl-button { background: linear-gradient(135deg, #3498db, #2980b9); color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-weight: 500; transition: all 0.2s ease; position: relative; overflow: hidden; }
-            .spl-button:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(52, 152, 219, 0.3); }
-            .spl-button:active { transform: translateY(0); }
-            .spl-button.secondary { background: linear-gradient(135deg, #95a5a6, #7f8c8d); }
-            .spl-button.danger { background: linear-gradient(135deg, #e74c3c, #c0392b); }
-            
-            .spl-dropdown { position: absolute; top: 100%; right: 0; min-width: 250px; background: #2c3e50; border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); z-index: 10000; opacity: 0; visibility: hidden; transform: translateY(-10px); transition: all 0.2s ease; }
-            .spl-dropdown.active { opacity: 1; visibility: visible; transform: translateY(0); }
-            .spl-dropdown-item { padding: 12px 16px; cursor: pointer; transition: background 0.2s ease; color: white; border-bottom: 1px solid rgba(255,255,255,0.1); }
-            .spl-dropdown-item:hover { background: #3498db; }
-            .spl-dropdown-item:last-child { border-bottom: none; border-radius: 0 0 8px 8px; }
-            .spl-dropdown-item:first-child { border-radius: 8px 8px 0 0; }
-            
-            .spl-notification { position: fixed; bottom: 20px; right: 20px; min-width: 320px; max-width: 400px; background: #2c3e50; color: white; padding: 16px; border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.4); z-index: 10001; }
-            .spl-notification.success { border-left: 4px solid #27ae60; }
-            .spl-notification.error { border-left: 4px solid #e74c3c; }
-            .spl-notification.info { border-left: 4px solid #3498db; }
-            
-            .spl-progress { width: 100%; height: 6px; background: rgba(255,255,255,0.2); border-radius: 3px; overflow: hidden; margin: 8px 0; }
-            .spl-progress-bar { height: 100%; background: linear-gradient(90deg, #3498db, #2ecc71); transition: width 0.3s ease; border-radius: 3px; }
-            
-            .spl-dialog { background: #2c3e50; color: white; padding: 24px; border-radius: 12px; max-width: 600px; width: 90vw; max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
-            .spl-dialog h3 { margin-top: 0; color: #3498db; font-size: 20px; }
-            .spl-quality-option { padding: 12px 16px; margin: 8px 0; background: #34495e; border-radius: 6px; cursor: pointer; transition: all 0.2s ease; display: flex; justify-content: space-between; align-items: center; }
-            .spl-quality-option:hover { background: #3498db; transform: translateX(4px); }
-            .spl-audio-indicator { font-size: 12px; padding: 2px 8px; border-radius: 12px; font-weight: 500; }
-            .spl-audio-indicator.has-audio { background: #27ae60; }
-            .spl-audio-indicator.no-audio { background: #e74c3c; }
-        `;
-
-        static inject() {
-            if (document.getElementById('spl-styles')) return;
-            
-            const styleSheet = document.createElement('style');
-            styleSheet.id = 'spl-styles';
-            styleSheet.textContent = this.styles;
-            document.head.appendChild(styleSheet);
-        }
-    }
-
-    /**
-     * Video Source Extractor
-     */
-    class VideoExtractor {
-        static CONFIG_PATTERNS = [
-            /window\.vimeoPlayerSetup\s*=\s*({.+?});/s,
-            /var\s+config\s*=\s*({.+?});/s,
-            /window\.playerConfig\s*=\s*({.+?});/s,
-            /playerConfig\s*[:=]\s*({.+?})[,;]/s,
-            /"config"\s*:\s*({.+?})[,}]/s
-        ];
-
-        static HLS_PATTERNS = [
-            /"url"\s*:\s*"(https:\/\/[^"]+\.m3u8[^"]*)"/g,
-            /https:\/\/[^\s"']+\.m3u8[^\s"']*/g
-        ];
-
-        static async extract(htmlContent) {
-            const sources = {
-                hls: null,
-                title: "Vimeo Video",
-                quality: {},
-                audioStreams: [],
-                configUrl: null,
-                iframeSrc: null
-            };
-
-            try {
-                // Method 1: Extract from player config
-                const config = this.extractPlayerConfig(htmlContent);
-                if (config) {
-                    this.extractFromConfig(config, sources);
-                    if (sources.hls) return sources;
-                }
-
-                // Method 2: Direct HLS URL search
-                const hlsUrl = this.extractDirectHLS(htmlContent);
-                if (hlsUrl) {
-                    sources.hls = hlsUrl;
-                    return sources;
-                }
-
-                // Method 3: Config URL extraction
-                const configUrl = this.extractConfigUrl(htmlContent);
-                if (configUrl) {
-                    sources.configUrl = configUrl;
-                    return sources;
-                }
-
-                // Method 4: Iframe fallback
-                const iframeSrc = this.extractIframeSrc(htmlContent);
-                if (iframeSrc) {
-                    sources.iframeSrc = iframeSrc;
-                    return sources;
-                }
-
-                return null;
-            } catch (error) {
-                Logger.error('Video extraction failed:', error);
-                return null;
-            }
-        }
-
-        static extractPlayerConfig(htmlContent) {
-            for (const pattern of this.CONFIG_PATTERNS) {
-                const match = htmlContent.match(pattern);
-                if (!match) continue;
-
-                try {
-                    let jsonStr = match[1]
-                        .replace(/(\w+):/g, '"$1":')
-                        .replace(/'/g, '"')
-                        .replace(/,\s*}/g, '}')
-                        .replace(/,\s*]/g, ']');
-                    
-                    const config = JSON.parse(jsonStr);
-                    if (config && (config.request || config.video)) {
-                        Logger.debug('Found player config');
-                        return config;
-                    }
-                } catch (e) {
-                    Logger.debug('Failed to parse config:', e.message);
-                }
-            }
-            return null;
-        }
-
-        static extractFromConfig(config, sources) {
-            if (config.video?.title) {
-                sources.title = config.video.title;
-            }
-
-            if (config.request?.files?.hls) {
-                const hlsConfig = config.request.files.hls;
-                const hlsUrl = hlsConfig.cdns?.akfire_interconnect_quic?.url ||
-                              hlsConfig.cdns?.[hlsConfig.default_cdn]?.url ||
-                              hlsConfig.url;
-                
-                if (hlsUrl) {
-                    sources.hls = hlsUrl;
-                    Logger.info('Extracted HLS from config:', hlsUrl);
-                }
-            }
-
-            // Extract audio streams from config
-            if (config.request?.files?.dash?.streams) {
-                const dashStreams = config.request.files.dash.streams;
-                sources.audioStreams = dashStreams
-                    .filter(stream => stream.profile?.includes('audio'))
-                    .map(stream => ({
-                        url: stream.url,
-                        name: 'Audio Track',
-                        language: stream.language || 'Unknown',
-                        isAudioOnly: true,
-                        bandwidth: stream.bandwidth
-                    }));
-            }
-
-            // Extract progressive (MP4) files if available
-            if (config.request?.files?.progressive) {
-                const mp4Sources = config.request.files.progressive;
-                mp4Sources.sort((a, b) => b.height - a.height);
-                
-                mp4Sources.forEach(source => {
-                    sources.quality[`${source.height}p`] = {
-                        url: source.url,
-                        quality: `${source.height}p`,
-                        format: 'mp4',
-                        width: source.width,
-                        height: source.height
-                    };
-                });
-            }
-        }
-
-        static extractDirectHLS(htmlContent) {
-            for (const pattern of this.HLS_PATTERNS) {
-                const matches = [...htmlContent.matchAll(pattern)];
-                if (matches.length > 0) {
-                    const url = matches[0][1] || matches[0][0];
-                    Logger.info('Found direct HLS URL:', url);
-                    return url.replace(/\\u0026/g, '&');
-                }
-            }
-            return null;
-        }
-
-        static extractConfigUrl(htmlContent) {
-            const match = htmlContent.match(/(?:master\.json|player\.vimeo\.com\/video\/\d+\/config)[^"'\s]+/);
-            if (match) {
-                const url = 'https://' + match[0].replace(/^\/\//, '');
-                Logger.debug('Found config URL:', url);
-                return url;
-            }
-            return null;
-        }
-
-        static extractIframeSrc(htmlContent) {
-            const match = htmlContent.match(/src=["']([^"']+player\.vimeo\.com\/video\/[^"']+)["']/);
-            if (match) {
-                Logger.debug('Found iframe src:', match[1]);
-                return match[1];
-            }
-            return null;
-        }
-    }
-
-    /**
-     * Optimized HLS Parser and Downloader
-     */
-    class HLSManager {
-        constructor() {
-            this.activeDownloads = new Map();
-            this.downloadQueue = [];
-        }
-
-        async parsePlaylist(m3u8Content, baseUrl) {
-            if (m3u8Content.includes('#EXT-X-STREAM-INF')) {
-                return this.parseMasterPlaylist(m3u8Content, baseUrl);
-            } else {
-                return this.parseMediaPlaylist(m3u8Content, baseUrl);
-            }
-        }
-
-        parseMasterPlaylist(content, baseUrl) {
-            const streams = [];
-            const audioStreams = [];
-            const lines = content.split('\n').map(line => line.trim());
-
-            let currentStream = null;
-
-            for (let i = 0; i < lines.length; i++) {
-                const line = lines[i];
-
-                if (line.startsWith('#EXT-X-STREAM-INF:')) {
-                    currentStream = this.parseStreamInfo(line);
-                } else if (line.startsWith('#EXT-X-MEDIA:') && line.includes('TYPE=AUDIO')) {
-                    const audioStream = this.parseAudioStream(line, baseUrl);
-                    if (audioStream) audioStreams.push(audioStream);
-                } else if (line && !line.startsWith('#') && currentStream) {
-                    currentStream.url = URLParser.resolveUrl(line, baseUrl);
-                    streams.push(currentStream);
-                    currentStream = null;
-                }
-            }
-
-            return {
-                type: 'master',
-                streams: streams.sort((a, b) => (b.bandwidth || 0) - (a.bandwidth || 0)),
-                audioStreams
-            };
-        }
-
-        parseStreamInfo(line) {
-            const stream = { attributes: {}, type: 'video' };
-            const attributesStr = line.substring(18);
-            
-            // More efficient attribute parsing
-            const attrRegex = /([A-Z-]+)=(?:"([^"]*)"|([^,]*))/g;
-            let match;
-            
-            while ((match = attrRegex.exec(attributesStr)) !== null) {
-                const key = match[1];
-                const value = match[2] || match[3];
-                stream.attributes[key] = value;
-            }
-
-            // Extract common properties
-            stream.resolution = stream.attributes.RESOLUTION;
-            stream.bandwidth = parseInt(stream.attributes.BANDWIDTH) || 0;
-            stream.frameRate = parseFloat(stream.attributes['FRAME-RATE']) || 0;
-            stream.codecs = stream.attributes.CODECS;
-            stream.audioGroup = stream.attributes.AUDIO;
-
-            return stream;
-        }
-
-        parseAudioStream(line, baseUrl) {
-            const attrRegex = /([A-Z-]+)=(?:"([^"]*)"|([^,]*))/g;
-            const attributes = {};
-            let match;
-
-            while ((match = attrRegex.exec(line)) !== null) {
-                attributes[match[1]] = match[2] || match[3];
-            }
-
-            if (attributes.URI) {
-                return {
-                    url: URLParser.resolveUrl(attributes.URI, baseUrl),
-                    groupId: attributes['GROUP-ID'],
-                    name: attributes.NAME || 'Audio Track',
-                    language: attributes.LANGUAGE || 'Unknown',
-                    isAudioOnly: true,
-                    attributes
-                };
-            }
-            return null;
-        }
-
-        parseMediaPlaylist(content, baseUrl) {
-            const segments = [];
-            const lines = content.split('\n').map(line => line.trim());
-            let currentSegment = null;
-
-            for (const line of lines) {
-                if (line.startsWith('#EXTINF:')) {
-                    const duration = parseFloat(line.substring(8).split(',')[0]);
-                    currentSegment = { duration, url: '' };
-                } else if (line && !line.startsWith('#') && currentSegment) {
-                    currentSegment.url = URLParser.resolveUrl(line, baseUrl);
-                    segments.push(currentSegment);
-                    currentSegment = null;
-                }
-            }
-
-            return { type: 'media', segments };
-        }
-
-        async fetchStreamData(m3u8Url) {
+    /* ==========================================================================
+       3. DOWNLOAD LOGIC (Preserved)
+       ========================================================================== */
+    const DownloadLogic = {
+        fetch(url, type) {
             return new Promise((resolve, reject) => {
                 GM_xmlhttpRequest({
-                    method: 'GET',
-                    url: m3u8Url,
-                    headers: {
-                        'Referer': 'https://www.patreon.com',
-                        'User-Agent': ConfigManager.get('userAgent')
-                    },
-                    onload: async (response) => {
-                        if (response.status !== 200) {
-                            reject(new Error(`HTTP ${response.status}`));
-                            return;
-                        }
-
-                        try {
-                            const data = await this.parsePlaylist(response.responseText, m3u8Url);
-                            resolve(data);
-                        } catch (error) {
-                            reject(error);
-                        }
-                    },
+                    method: 'GET', url, responseType: type,
+                    headers: { 'Referer': 'https://www.patreon.com' },
+                    onload: r => (r.status >= 200 && r.status < 300) ? resolve(r.response) : reject(new Error(`HTTP ${r.status}`)),
                     onerror: reject
                 });
             });
-        }
+        },
 
-        async downloadStream(m3u8Url, filename, progressCallback) {
-            const downloadId = Utils.createUUID();
-            this.activeDownloads.set(downloadId, { cancelled: false });
+        async downloadStream(streamUrl, onProgress) {
+            const manifest = await this.fetch(streamUrl, 'text');
+            const baseUrl = streamUrl.substring(0, streamUrl.lastIndexOf('/') + 1);
+            const segments = manifest.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#')).map(l => l.startsWith('http') ? l : baseUrl + l);
 
-            try {
-                progressCallback({ progress: 0, status: 'info', message: 'Analyzing stream...' });
-                
-                const streamData = await this.fetchStreamData(m3u8Url);
-                const isAudioOnly = filename.endsWith('.m4a') || m3u8Url.includes('audio') || m3u8Url.includes('st=audio');
-                
-                if (streamData.type === 'master') {
-                    // For master playlists, find the appropriate stream
-                    let selectedStream;
-                    
-                    if (isAudioOnly && streamData.audioStreams && streamData.audioStreams.length > 0) {
-                        // Select first audio stream for audio-only downloads
-                        selectedStream = streamData.audioStreams[0];
-                        progressCallback({ progress: 0, status: 'info', message: `Selected audio track: ${selectedStream.name || 'Audio Track'}` });
-                    } else {
-                        // Select highest quality video stream
-                        selectedStream = streamData.streams[0];
-                        if (!selectedStream) {
-                            throw new Error('No streams found');
-                        }
-                        progressCallback({ progress: 0, status: 'info', message: `Selected quality: ${selectedStream.resolution || 'Unknown'}` });
-                    }
-                    
-                    const mediaData = await this.fetchStreamData(selectedStream.url);
-                    if (mediaData.type !== 'media') {
-                        throw new Error('Invalid media playlist');
-                    }
-                    
-                    await this.downloadSegments(mediaData.segments, filename, progressCallback, downloadId, isAudioOnly);
-                } else {
-                    // Direct media playlist
-                    await this.downloadSegments(streamData.segments, filename, progressCallback, downloadId, isAudioOnly);
-                }
-            } catch (error) {
-                progressCallback({ progress: 0, status: 'error', message: error.message });
-            } finally {
-                this.activeDownloads.delete(downloadId);
-            }
-        }
+            if (!segments.length) throw new Error('No segments found in playlist.');
 
-        async downloadSegments(segments, filename, progressCallback, downloadId, isAudioOnly = false) {
-            const totalSegments = segments.length;
-            const chunks = new Array(totalSegments);
-            const maxConcurrent = ConfigManager.get('maxConcurrentDownloads');
-            let completed = 0;
-            let totalBytes = 0;
-
-            const mediaType = isAudioOnly ? 'audio segments' : 'video segments';
-            progressCallback({ progress: 0, status: 'info', message: `Downloading ${totalSegments} ${mediaType}...` });
-
-            // Download segments in batches
-            for (let i = 0; i < totalSegments; i += maxConcurrent) {
-                if (this.activeDownloads.get(downloadId)?.cancelled) {
-                    throw new Error('Download cancelled');
-                }
-
-                const batch = segments.slice(i, i + maxConcurrent);
-                const promises = batch.map(async (segment, index) => {
-                    const segmentIndex = i + index;
-                    try {
-                        const data = await this.downloadSegment(segment.url);
-                        chunks[segmentIndex] = data;
-                        totalBytes += data.byteLength;
-                        completed++;
-                        
-                        progressCallback({
-                            progress: completed / totalSegments,
-                            status: 'progress',
-                            message: `Downloaded ${completed}/${totalSegments} ${mediaType}`,
-                            bytes: totalBytes
-                        });
-                    } catch (error) {
-                        Logger.warn(`Failed to download segment ${segmentIndex}:`, error);
-                        // Continue with other segments
-                    }
-                });
-
-                await Promise.allSettled(promises);
+            const chunks = [];
+            for (let i = 0; i < segments.length; i++) {
+                const chunk = await this.fetch(segments[i], 'arraybuffer');
+                chunks.push(chunk);
+                onProgress((i + 1) / segments.length * 100, `Segment ${i + 1}/${segments.length}`);
             }
 
-            // Combine segments
-            progressCallback({ progress: 1, status: 'info', message: 'Combining segments...' });
-            const combined = this.combineSegments(chunks.filter(Boolean));
-            
-            // Download the file
-            this.saveFile(combined, filename, isAudioOnly);
-            progressCallback({
-                progress: 1,
-                status: 'complete',
-                message: 'Download complete!',
-                size: combined.byteLength
-            });
-        }
+            return new Blob(chunks, { type: 'video/mp2t' });
+        },
 
-        async downloadSegment(url) {
-            return new Promise((resolve, reject) => {
-                GM_xmlhttpRequest({
-                    method: 'GET',
-                    url: url,
-                    responseType: 'arraybuffer',
-                    headers: {
-                        'Referer': 'https://www.patreon.com',
-                        'User-Agent': ConfigManager.get('userAgent')
-                    },
-                    onload: (response) => {
-                        if (response.status === 200) {
-                            resolve(response.response);
-                        } else {
-                            reject(new Error(`HTTP ${response.status}`));
-                        }
-                    },
-                    onerror: reject
-                });
-            });
-        }
-
-        combineSegments(chunks) {
-            const totalSize = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
-            const combined = new Uint8Array(totalSize);
-            let offset = 0;
-
-            for (const chunk of chunks) {
-                combined.set(new Uint8Array(chunk), offset);
-                offset += chunk.byteLength;
-            }
-
-            return combined;
-        }
-
-        saveFile(data, filename, isAudioOnly = false) {
-            // Determine correct MIME type based on file extension
-            let mimeType = 'video/mp4';
-            
-            if (isAudioOnly || filename.endsWith('.m4a')) {
-                mimeType = 'audio/mp4';
-            } else if (filename.endsWith('.mp3')) {
-                mimeType = 'audio/mpeg';
-            } else if (filename.endsWith('.aac')) {
-                mimeType = 'audio/aac';
-            }
-            
-            const blob = new Blob([data], { type: mimeType });
-            const url = URL.createObjectURL(blob);
-            
+        saveBlob(blob, filename) {
             const a = document.createElement('a');
-            a.href = url;
-            a.download = Utils.sanitizeFilename(filename);
-            a.style.display = 'none';
-            
+            a.href = URL.createObjectURL(blob);
+            a.download = filename;
             document.body.appendChild(a);
             a.click();
-            document.body.removeChild(a);
-            
-            setTimeout(() => URL.revokeObjectURL(url), 100);
-        }
-
-        cancelDownload(downloadId) {
-            const download = this.activeDownloads.get(downloadId);
-            if (download) {
-                download.cancelled = true;
-            }
-        }
-    }
-
-    /**
-     * UI Manager
-     */
-    class UIManager {
-        constructor() {
-            this.notifications = new Map();
-            this.currentDialog = null;
-        }
-
-        showLoading(videoId) {
-            const overlay = this.createElement('div', 'spl-overlay');
-            const container = this.createElement('div', 'spl-container spl-fade-in');
-            
-            container.innerHTML = `
-                <div style="text-align: center; color: white;">
-                    <div class="spl-spinner"></div>
-                    <div style="font-size: 18px; margin-bottom: 8px;">Loading Video ${videoId}</div>
-                    <div id="spl-progress-text" style="color: #95a5a6;">Connecting to Vimeo...</div>
-                </div>
-            `;
-
-            document.body.appendChild(overlay);
-            document.body.appendChild(container);
-
-            return {
-                updateProgress: (text) => {
-                    const progressEl = document.getElementById('spl-progress-text');
-                    if (progressEl) progressEl.textContent = text;
-                },
-                remove: () => {
-                    overlay.remove();
-                    container.remove();
-                }
-            };
-        }
-
-        showVideoPlayer(videoUrl, videoId, videoSources) {
-            document.body.innerHTML = '';
-            document.documentElement.style.cssText = 'background: #1a1a1a; margin: 0; padding: 0;';
-
-            const player = this.createElement('div', 'spl-player');
-            
-            const controls = this.createElement('div', 'spl-controls');
-            controls.innerHTML = `
-                <div class="spl-title">${videoSources.title || `Vimeo Video #${videoId}`}</div>
-                <div class="spl-button-group">
-                    <button id="spl-fullscreen" class="spl-button">⛶ Fullscreen</button>
-                    <div style="position: relative;">
-                        <button id="spl-download" class="spl-button">⬇ Download</button>
-                        <div id="spl-download-dropdown" class="spl-dropdown"></div>
-                    </div>
-                    <button id="spl-refresh" class="spl-button secondary">↻ Refresh</button>
-                </div>
-            `;
-
-            const iframe = this.createElement('iframe');
-            iframe.src = videoUrl;
-            iframe.style.cssText = 'flex: 1; width: 100%; border: none;';
-            iframe.allowFullscreen = true;
-
-            player.appendChild(controls);
-            player.appendChild(iframe);
-            document.body.appendChild(player);
-
-            this.setupPlayerControls(videoId, videoSources);
-        }
-
-        setupPlayerControls(videoId, videoSources) {
-            // Fullscreen
-            document.getElementById('spl-fullscreen').onclick = () => {
-                if (document.fullscreenElement) {
-                    document.exitFullscreen();
-                } else {
-                    document.querySelector('.spl-player').requestFullscreen();
-                }
-            };
-
-            // Refresh
-            document.getElementById('spl-refresh').onclick = () => location.reload();
-
-            // Download dropdown
-            this.setupDownloadDropdown(videoId, videoSources);
-        }
-
-        setupDownloadDropdown(videoId, videoSources) {
-            const downloadBtn = document.getElementById('spl-download');
-            const dropdown = document.getElementById('spl-download-dropdown');
-
-            const options = [];
-
-            if (videoSources.hls) {
-                options.push({
-                    text: '🎬 Download Video (HLS)',
-                    action: () => this.showQualityDialog(videoSources.hls, videoId, videoSources.title)
-                });
-
-                options.push({
-                    text: '📄 Save HLS Stream (m3u8)',
-                    action: () => this.saveM3U8File(videoSources.hls, `${videoSources.title || `vimeo-${videoId}`}.m3u8`)
-                });
-
-                options.push({
-                    text: '📋 Copy Stream URL',
-                    action: () => this.copyToClipboard(videoSources.hls, 'Stream URL copied!')
-                });
-            }
-
-            // Add MP4 direct download options if available
-            if (videoSources.quality && Object.keys(videoSources.quality).length > 0) {
-                options.push({
-                    text: '📹 Direct MP4 Downloads',
-                    action: () => this.showMP4QualityDialog(videoSources.quality, videoId, videoSources.title)
-                });
-            }
-
-            if (videoSources.configUrl && !videoSources.hls) {
-                options.push({
-                    text: '📋 Copy Config URL',
-                    action: () => this.copyToClipboard(videoSources.configUrl, 'Config URL copied!')
-                });
-            }
-
-            if (options.length === 0) {
-                options.push({
-                    text: '❓ Download Help',
-                    action: () => this.showDownloadHelp(videoId)
-                });
-            }
-
-            dropdown.innerHTML = options.map(opt => 
-                `<div class="spl-dropdown-item">${opt.text}</div>`
-            ).join('');
-
-            dropdown.querySelectorAll('.spl-dropdown-item').forEach((item, index) => {
-                item.onclick = () => {
-                    dropdown.classList.remove('active');
-                    options[index].action();
-                };
-            });
-
-            downloadBtn.onclick = (e) => {
-                e.stopPropagation();
-                dropdown.classList.toggle('active');
-            };
-
-            document.addEventListener('click', (e) => {
-                if (!downloadBtn.contains(e.target)) {
-                    dropdown.classList.remove('active');
-                }
-            });
-        }
-
-        async showQualityDialog(m3u8Url, videoId, title) {
-            const overlay = this.createElement('div', 'spl-overlay', {
-                style: 'display: flex; align-items: center; justify-content: center;'
-            });
-
-            const dialog = this.createElement('div', 'spl-dialog spl-slide-in');
-            dialog.innerHTML = `
-                <h3>HLS Stream Download</h3>
-                <p>Analyzing available qualities...</p>
-                <div class="spl-spinner" style="margin: 20px auto;"></div>
-                <div id="spl-quality-list"></div>
-                <div id="spl-audio-list" style="margin-top: 15px; border-top: 1px solid #444; padding-top: 15px; display: none;">
-                    <h4 style="margin-top: 0; color: #3498db;">🔊 Audio Tracks (Audio Only)</h4>
-                    <div id="spl-audio-tracks"></div>
-                </div>
-                <div style="display: flex; justify-content: space-between; margin-top: 20px;">
-                    <button id="spl-close-dialog" class="spl-button secondary">Close</button>
-                    <button id="spl-download-best" class="spl-button">Download Best Quality</button>
-                </div>
-                <div style="margin-top: 15px; font-size: 12px; color: #95a5a6;">
-                    <p><strong>💡 Audio Solutions:</strong></p>
-                    <ul style="margin: 5px 0; padding-left: 20px;">
-                        <li>🔊 <strong>Audio tracks above</strong> - Download audio separately as .m4a files</li>
-                        <li>📄 <strong>Save HLS Stream</strong> - Use VLC player for guaranteed audio+video playback</li>
-                        <li>📹 <strong>Direct MP4</strong> - Use menu option if available (includes audio)</li>
-                    </ul>
-                </div>
-            `;
-
-            overlay.appendChild(dialog);
-            document.body.appendChild(overlay);
-            this.currentDialog = overlay;
-
-            // Close handlers
-            document.getElementById('spl-close-dialog').onclick = () => this.closeDialog();
-            document.getElementById('spl-download-best').onclick = () => {
-                this.startDownload(m3u8Url, title || `vimeo-${videoId}.mp4`);
-                this.closeDialog();
-            };
-
-            try {
-                const hlsManager = new HLSManager();
-                const streamData = await hlsManager.fetchStreamData(m3u8Url);
-                
-                dialog.querySelector('.spl-spinner').remove();
-                dialog.querySelector('p').textContent = 'Select quality to download:';
-
-                if (streamData.type === 'master' && streamData.streams.length > 0) {
-                    this.populateQualityList(streamData, videoId, title);
-                } else {
-                    document.getElementById('spl-quality-list').innerHTML = '<p>No quality options found. Use "Download Best Quality" button.</p>';
-                }
-            } catch (error) {
-                this.showError(`Failed to analyze stream: ${error.message}`);
-                this.closeDialog();
-            }
-        }
-
-        populateQualityList(streamData, videoId, title) {
-            const qualityList = document.getElementById('spl-quality-list');
-            const audioList = document.getElementById('spl-audio-list');
-            const audioTracks = document.getElementById('spl-audio-tracks');
-            
-            // Filter video and audio streams
-            const videoStreams = streamData.streams.filter(s => !s.isAudioOnly);
-            const audioStreams = streamData.audioStreams || [];
-            
-            // Populate video quality options
-            qualityList.innerHTML = videoStreams.map(stream => {
-                const label = this.getQualityLabel(stream);
-                const hasAudio = stream.codecs && stream.codecs.includes('mp4a');
-                const audioClass = hasAudio ? 'has-audio' : 'no-audio';
-                const audioText = hasAudio ? '✓ Audio' : '✗ No Audio';
-                
-                return `
-                    <div class="spl-quality-option" data-url="${stream.url}" data-label="${label}">
-                        <div>
-                            <strong>${label}</strong>
-                            <span class="spl-audio-indicator ${audioClass}">${audioText}</span>
-                        </div>
-                        <div>${Utils.formatBitrate(stream.bandwidth)}</div>
-                    </div>
-                `;
-            }).join('');
-
-            // Populate audio tracks if available
-            if (audioStreams.length > 0) {
-                audioList.style.display = 'block';
-                audioTracks.innerHTML = audioStreams.map(audioStream => {
-                    const audioName = audioStream.name || 'Audio Track';
-                    const language = audioStream.language ? ` (${audioStream.language})` : '';
-                    
-                    return `
-                        <div class="spl-quality-option" data-url="${audioStream.url}" data-label="audio" data-name="${audioName}">
-                            <div>
-                                <strong>🔊 ${audioName}${language}</strong>
-                                <span class="spl-audio-indicator has-audio">Audio Only</span>
-                            </div>
-                            <div>Audio Track</div>
-                        </div>
-                    `;
-                }).join('');
-
-                // Add audio track click handlers
-                audioTracks.querySelectorAll('.spl-quality-option').forEach(option => {
-                    option.onclick = () => {
-                        const url = option.dataset.url;
-                        const audioName = option.dataset.name;
-                        const filename = `${title || `vimeo-${videoId}`}_${audioName.replace(/[^a-zA-Z0-9]/g, '_')}.m4a`;
-                        this.startDownload(url, filename);
-                        this.closeDialog();
-                    };
-                });
-            }
-
-            // Add warning if no streams have audio
-            const hasAnyAudio = videoStreams.some(s => s.codecs && s.codecs.includes('mp4a')) || audioStreams.length > 0;
-            if (!hasAnyAudio) {
-                const warningDiv = document.createElement('div');
-                warningDiv.style.cssText = 'background: #e74c3c; color: white; padding: 12px; border-radius: 6px; margin: 10px 0;';
-                warningDiv.innerHTML = `
-                    <strong>⚠️ Audio Warning:</strong> No audio detected in any stream.
-                    For guaranteed audio playback, use "Save HLS Stream" option and open in VLC player.
-                `;
-                qualityList.appendChild(warningDiv);
-            }
-
-            // Add video quality click handlers
-            qualityList.querySelectorAll('.spl-quality-option').forEach(option => {
-                option.onclick = () => {
-                    const url = option.dataset.url;
-                    const label = option.dataset.label;
-                    const filename = `${title || `vimeo-${videoId}`}_${label}.mp4`;
-                    this.startDownload(url, filename);
-                    this.closeDialog();
-                };
-            });
-        }
-
-        getQualityLabel(stream) {
-            if (stream.resolution) {
-                const match = stream.resolution.match(/\d+x(\d+)/);
-                if (match) {
-                    let label = `${match[1]}p`;
-                    if (stream.frameRate >= 50) {
-                        label += ` ${Math.round(stream.frameRate)}fps`;
-                    }
-                    return label;
-                }
-                return stream.resolution;
-            }
-            return 'Unknown';
-        }
-
-        startDownload(url, filename) {
-            const hlsManager = new HLSManager();
-            const notificationId = this.showNotification({
-                type: 'info',
-                title: `Downloading ${filename}`,
-                message: 'Preparing download...',
-                persistent: true,
-                showProgress: true
-            });
-
-            hlsManager.downloadStream(url, filename, ({ progress, status, message, bytes, size }) => {
-                switch (status) {
-                    case 'progress':
-                        this.updateNotification(notificationId, {
-                            message: `${Math.round(progress * 100)}% - ${message}`,
-                            progress: progress
-                        });
-                        break;
-                    case 'info':
-                        this.updateNotification(notificationId, { message });
-                        break;
-                    case 'complete':
-                        this.updateNotification(notificationId, {
-                            type: 'success',
-                            message: `Download complete! (${Utils.formatBytes(size)})`,
-                            progress: 1,
-                            autoClose: 5000
-                        });
-                        break;
-                    case 'error':
-                        this.updateNotification(notificationId, {
-                            type: 'error',
-                            message: `Error: ${message}`,
-                            autoClose: 8000
-                        });
-                        break;
-                }
-            });
-        }
-
-        saveM3U8File(url, filename) {
-            const content = `#EXTM3U\n#EXT-X-STREAM-INF:PROGRAM-ID=1\n${url}`;
-            const blob = new Blob([content], { type: 'application/x-mpegurl' });
-            const downloadUrl = URL.createObjectURL(blob);
-            
-            const a = document.createElement('a');
-            a.href = downloadUrl;
-            a.download = Utils.sanitizeFilename(filename);
-            a.click();
-            
-            setTimeout(() => URL.revokeObjectURL(downloadUrl), 100);
-            
-            this.showNotification({
-                type: 'success',
-                title: 'HLS Stream Saved',
-                message: 'Open with VLC or similar player for best results',
-                autoClose: 5000
-            });
-        }
-
-        showMP4QualityDialog(qualityOptions, videoId, title) {
-            const overlay = this.createElement('div', 'spl-overlay', {
-                style: 'display: flex; align-items: center; justify-content: center;'
-            });
-
-            const dialog = this.createElement('div', 'spl-dialog spl-slide-in');
-            dialog.innerHTML = `
-                <h3>📹 Direct MP4 Downloads</h3>
-                <p>Select quality to download directly (with guaranteed audio):</p>
-                <div id="spl-mp4-quality-list"></div>
-                <div style="display: flex; justify-content: space-between; margin-top: 20px;">
-                    <button id="spl-close-mp4-dialog" class="spl-button secondary">Close</button>
-                </div>
-                <div style="margin-top: 15px; font-size: 12px; color: #95a5a6;">
-                    <p><strong>✅ Advantage:</strong> MP4 files include both video and audio in a single file</p>
-                </div>
-            `;
-
-            overlay.appendChild(dialog);
-            document.body.appendChild(overlay);
-            this.currentDialog = overlay;
-
-            // Close handler
-            document.getElementById('spl-close-mp4-dialog').onclick = () => this.closeDialog();
-
-            // Populate MP4 quality options
-            const mp4QualityList = document.getElementById('spl-mp4-quality-list');
-            mp4QualityList.innerHTML = Object.values(qualityOptions).map(quality => {
-                return `
-                    <div class="spl-quality-option" data-url="${quality.url}" data-quality="${quality.quality}">
-                        <div>
-                            <strong>${quality.quality} (${quality.width}x${quality.height})</strong>
-                            <span class="spl-audio-indicator has-audio">✓ Video + Audio</span>
-                        </div>
-                        <div>MP4 Direct</div>
-                    </div>
-                `;
-            }).join('');
-
-            // Add click handlers for MP4 downloads
-            mp4QualityList.querySelectorAll('.spl-quality-option').forEach(option => {
-                option.onclick = () => {
-                    const url = option.dataset.url;
-                    const quality = option.dataset.quality;
-                    const filename = `${title || `vimeo-${videoId}`}_${quality}.mp4`;
-                    this.downloadFile(url, filename);
-                    this.closeDialog();
-                };
-            });
-        }
-
-        downloadFile(url, filename) {
-            // Create download notification
-            const notificationId = this.showNotification({
-                type: 'info',
-                title: `Downloading ${filename}`,
-                message: 'Starting download...',
-                persistent: true,
-                showProgress: true
-            });
-
-            // Use XMLHttpRequest for progress tracking
-            const xhr = new XMLHttpRequest();
-            xhr.open('GET', url, true);
-            xhr.responseType = 'blob';
-
-            xhr.onprogress = (e) => {
-                if (e.lengthComputable) {
-                    const progress = e.loaded / e.total;
-                    const percent = Math.round(progress * 100);
-                    this.updateNotification(notificationId, {
-                        message: `Downloading: ${percent}% (${Utils.formatBytes(e.loaded)} / ${Utils.formatBytes(e.total)})`,
-                        progress: progress
-                    });
-                } else {
-                    this.updateNotification(notificationId, {
-                        message: `Downloaded: ${Utils.formatBytes(e.loaded)}`
-                    });
-                }
-            };
-
-            xhr.onload = () => {
-                if (xhr.status === 200) {
-                    const blob = new Blob([xhr.response], { type: 'video/mp4' });
-                    const downloadUrl = URL.createObjectURL(blob);
-                    
-                    const a = document.createElement('a');
-                    a.href = downloadUrl;
-                    a.download = Utils.sanitizeFilename(filename);
-                    a.style.display = 'none';
-                    document.body.appendChild(a);
-                    a.click();
-                    document.body.removeChild(a);
-                    
-                    setTimeout(() => URL.revokeObjectURL(downloadUrl), 100);
-
-                    this.updateNotification(notificationId, {
-                        type: 'success',
-                        message: `Download complete! (${Utils.formatBytes(xhr.response.size)})`,
-                        progress: 1,
-                        autoClose: 5000
-                    });
-                } else {
-                    this.updateNotification(notificationId, {
-                        type: 'error',
-                        message: `Download failed: HTTP ${xhr.status}`,
-                        autoClose: 8000
-                    });
-                }
-            };
-
-            xhr.onerror = () => {
-                this.updateNotification(notificationId, {
-                    type: 'error',
-                    message: 'Download failed: Network error',
-                    autoClose: 8000
-                });
-            };
-
-            xhr.send();
-        }
-
-        async copyToClipboard(text, successMessage) {
-            try {
-                await navigator.clipboard.writeText(text);
-                this.showNotification({
-                    type: 'success',
-                    title: 'Copied!',
-                    message: successMessage,
-                    autoClose: 3000
-                });
-            } catch (error) {
-                // Fallback
-                const textarea = document.createElement('textarea');
-                textarea.value = text;
-                document.body.appendChild(textarea);
-                textarea.select();
-                document.execCommand('copy');
-                document.body.removeChild(textarea);
-                
-                this.showNotification({
-                    type: 'success',
-                    title: 'Copied!',
-                    message: successMessage,
-                    autoClose: 3000
-                });
-            }
-        }
-
-        showNotification({ type = 'info', title, message, autoClose, persistent, showProgress }) {
-            const id = Utils.createUUID();
-            
-            const notification = this.createElement('div', `spl-notification ${type} spl-slide-in`);
-            notification.innerHTML = `
-                <div style="font-weight: 600; margin-bottom: 4px;">${title}</div>
-                <div style="color: rgba(255,255,255,0.9);">${message}</div>
-                ${showProgress ? '<div class="spl-progress"><div class="spl-progress-bar" style="width: 0%;"></div></div>' : ''}
-                ${!persistent ? '<div style="margin-top: 8px; text-align: right;"><button class="spl-button" style="padding: 4px 8px; font-size: 12px;">✕</button></div>' : ''}
-            `;
-
-            document.body.appendChild(notification);
-            this.notifications.set(id, notification);
-
-            if (!persistent) {
-                const closeBtn = notification.querySelector('button');
-                if (closeBtn) {
-                    closeBtn.onclick = () => this.removeNotification(id);
-                }
-            }
-
-            if (autoClose) {
-                setTimeout(() => this.removeNotification(id), autoClose);
-            }
-
-            return id;
-        }
-
-        updateNotification(id, { type, message, progress, autoClose }) {
-            const notification = this.notifications.get(id);
-            if (!notification) return;
-
-            if (type) {
-                notification.className = `spl-notification ${type}`;
-            }
-            
-            if (message) {
-                const messageEl = notification.children[1];
-                if (messageEl) messageEl.textContent = message;
-            }
-            
-            if (progress !== undefined) {
-                const progressBar = notification.querySelector('.spl-progress-bar');
-                if (progressBar) {
-                    progressBar.style.width = `${progress * 100}%`;
-                }
-            }
-            
-            if (autoClose) {
-                setTimeout(() => this.removeNotification(id), autoClose);
-            }
-        }
-
-        removeNotification(id) {
-            const notification = this.notifications.get(id);
-            if (notification) {
-                notification.style.transform = 'translateX(100%)';
-                notification.style.opacity = '0';
-                setTimeout(() => {
-                    notification.remove();
-                    this.notifications.delete(id);
-                }, 300);
-            }
-        }
-
-        showDownloadHelp(videoId) {
-            const overlay = this.createElement('div', 'spl-overlay', {
-                style: 'display: flex; align-items: center; justify-content: center;'
-            });
-
-            const dialog = this.createElement('div', 'spl-dialog spl-slide-in');
-            dialog.innerHTML = `
-                <h3>Download Help</h3>
-                <p>This video couldn't be automatically processed. Try these methods:</p>
-                
-                <h4>Method 1: Browser Developer Tools</h4>
-                <ol>
-                    <li>Press F12 to open Developer Tools</li>
-                    <li>Go to the Network tab</li>
-                    <li>Refresh the page and look for .mp4 or .m3u8 files</li>
-                    <li>Right-click and save or copy the URL</li>
-                </ol>
-                
-                <h4>Method 2: External Tools</h4>
-                <ul>
-                    <li>Use yt-dlp: <code>yt-dlp https://vimeo.com/${videoId}</code></li>
-                    <li>Browser extensions like "Video DownloadHelper"</li>
-                </ul>
-                
-                <button id="spl-close-help" class="spl-button" style="margin-top: 20px;">Close</button>
-            `;
-
-            overlay.appendChild(dialog);
-            document.body.appendChild(overlay);
-            this.currentDialog = overlay;
-
-            document.getElementById('spl-close-help').onclick = () => this.closeDialog();
-        }
-
-        showError(message) {
-            document.body.innerHTML = '';
-            
-            const container = this.createElement('div', 'spl-container spl-fade-in');
-            container.innerHTML = `
-                <div style="text-align: center; color: white;">
-                    <div style="font-size: 48px; color: #e74c3c; margin-bottom: 20px;">⚠</div>
-                    <h2 style="color: #e74c3c; margin: 0 0 10px 0;">Error</h2>
-                    <p style="color: #ecf0f1; margin-bottom: 20px;">${message}</p>
-                    <button class="spl-button" onclick="location.reload()">Try Again</button>
-                </div>
-            `;
-            
-            document.body.appendChild(container);
-        }
-
-        closeDialog() {
-            if (this.currentDialog) {
-                this.currentDialog.remove();
-                this.currentDialog = null;
-            }
-        }
-
-        createElement(tag, className = '', attributes = {}) {
-            const element = document.createElement(tag);
-            if (className) element.className = className;
-            Object.assign(element, attributes);
-            return element;
-        }
-    }
-
-    /**
-     * Main Application Class
-     */
-    class VimeoSPL {
-        constructor() {
-            this.ui = new UIManager();
-            this.hlsManager = new HLSManager();
-            this.loadingUI = null;
-        }
-
-        async init() {
-            try {
-                StyleManager.inject();
-                
-                if (!this.isRestrictedVideo()) {
-                    Logger.debug('Not a restricted video page');
-                    return;
-                }
-
-                const videoId = URLParser.extractVideoId(window.location.href);
-                this.loadingUI = this.ui.showLoading(videoId);
-                
-                await this.loadVideo(videoId);
-            } catch (error) {
-                Logger.error('Initialization failed:', error);
-                this.ui.showError(error.message);
-            }
-        }
-
-        isRestrictedVideo() {
-            const indicators = [
-                '.exception_title.iris_header',
-                '.private-content-banner',
-                '[data-test-id="private-video-banner"]'
-            ];
-
-            if (indicators.some(selector => document.querySelector(selector))) {
-                return true;
-            }
-
-            const pageText = document.body.textContent || '';
-            const restrictedPhrases = [
-                'This video is private',
-                'because of its privacy settings',
-                'content is available with',
-                'Page not found',
-                'Due to privacy settings'
-            ];
-
-            return restrictedPhrases.some(phrase => pageText.includes(phrase));
-        }
-
-        async loadVideo(videoId) {
-            const timeout = ConfigManager.get('loadTimeout');
-            const timeoutPromise = new Promise((_, reject) =>
-                setTimeout(() => reject(new Error('Request timeout')), timeout)
-            );
-
-            try {
-                this.loadingUI.updateProgress('Fetching video data...');
-                
-                const response = await Promise.race([
-                    this.fetchVideoData(videoId),
-                    timeoutPromise
-                ]);
-
-                this.loadingUI.updateProgress('Processing video...');
-                
-                const videoSources = await VideoExtractor.extract(response);
-                if (!videoSources) {
-                    throw new Error('No video sources found');
-                }
-
-                // Fetch additional config if needed
-                if (!videoSources.hls && videoSources.configUrl) {
-                    this.loadingUI.updateProgress('Fetching additional data...');
-                    await this.fetchAdditionalConfig(videoSources);
-                }
-
-                // Setup video player
-                const videoUrl = videoSources.iframeSrc || 
-                    URL.createObjectURL(new Blob([response], { type: 'text/html' }));
-                
-                this.loadingUI.remove();
-                this.ui.showVideoPlayer(videoUrl, videoId, videoSources);
-                
-                Logger.info('Video loaded successfully');
-            } catch (error) {
-                if (this.loadingUI) this.loadingUI.remove();
-                throw error;
-            }
-        }
-
-        async fetchVideoData(videoId) {
-            return new Promise((resolve, reject) => {
-                GM_xmlhttpRequest({
-                    method: 'GET',
-                    url: `https://player.vimeo.com/video/${videoId}`,
-                    headers: {
-                        'Referer': 'https://www.patreon.com',
-                        'User-Agent': ConfigManager.get('userAgent'),
-                        'Cache-Control': 'no-cache'
-                    },
-                    onload: (response) => {
-                        if (response.status >= 400) {
-                            reject(new Error(`Server error: ${response.status}`));
-                            return;
-                        }
-                        resolve(response.responseText);
-                    },
-                    onerror: () => reject(new Error('Network error'))
-                });
-            });
-        }
-
-        async fetchAdditionalConfig(videoSources) {
-            return new Promise((resolve, reject) => {
-                GM_xmlhttpRequest({
-                    method: 'GET',
-                    url: videoSources.configUrl,
-                    headers: {
-                        'Referer': 'https://www.patreon.com',
-                        'User-Agent': ConfigManager.get('userAgent'),
-                        'Accept': 'application/json'
-                    },
-                    onload: (response) => {
-                        try {
-                            if (response.status >= 400) {
-                                throw new Error(`Config request failed: ${response.status}`);
-                            }
-
-                            const config = JSON.parse(response.responseText);
-                            VideoExtractor.extractFromConfig(config, videoSources);
-                            resolve();
-                        } catch (error) {
-                            Logger.warn('Config parsing failed:', error);
-                            resolve(); // Continue without config
-                        }
-                    },
-                    onerror: () => {
-                        Logger.warn('Config request failed');
-                        resolve(); // Continue without config
-                    }
-                });
-            });
-        }
-    }
-
-    // Initialize the application
-    const app = new VimeoSPL();
-    
-    // Robust initialization with retry logic
-    const initWithRetry = async (attempts = 3) => {
-        for (let i = 0; i < attempts; i++) {
-            try {
-                await app.init();
-                break;
-            } catch (error) {
-                Logger.error(`Initialization attempt ${i + 1} failed:`, error);
-                if (i === attempts - 1) {
-                    // Final attempt failed
-                    const ui = new UIManager();
-                    StyleManager.inject();
-                    ui.showError('Failed to initialize SPL. Please refresh the page.');
-                } else {
-                    // Wait before retry
-                    await Utils.sleep(1000 * (i + 1));
-                }
-            }
+            setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+            UI.toast(`Saved: ${filename}`);
         }
     };
 
-    // Start initialization based on document state
-    if (document.readyState === 'complete') {
-        setTimeout(() => initWithRetry(), 500);
-    } else {
-        window.addEventListener('load', () => {
-            setTimeout(() => initWithRetry(), 500);
+    /* ==========================================================================
+       4. UI COMPONENTS
+       ========================================================================== */
+    const UI = {
+        el(tag, cls, html) {
+            const d = document.createElement(tag);
+            if (cls) d.className = cls;
+            if (html) d.innerHTML = html;
+            return d;
+        },
+
+        toast(msg) {
+            if (!this.toastEl) {
+                this.toastEl = this.el('div', 'spl-toast');
+                document.body.appendChild(this.toastEl);
+            }
+            this.toastEl.textContent = msg;
+            this.toastEl.classList.add('show');
+            clearTimeout(this.toastTimer);
+            this.toastTimer = setTimeout(() => this.toastEl.classList.remove('show'), 3000);
+        },
+
+        createModal() {
+            const overlay = this.el('div', 'spl-modal-bg');
+            const box = this.el('div', 'spl-modal');
+
+            const header = this.el('div', 'spl-modal-header');
+            header.innerHTML = `<span class="spl-modal-title">Download Media</span>`;
+            const closeBtn = this.el('button', 'spl-close-btn', '×');
+            closeBtn.onclick = () => this.closeModal();
+            header.appendChild(closeBtn);
+
+            const list = this.el('div', 'spl-list');
+
+            const progView = this.el('div', 'spl-dl-state');
+            progView.innerHTML = `
+                <div style="font-weight:600;font-size:16px;">Processing Stream...</div>
+                <div class="spl-dl-bar-bg"><div class="spl-dl-bar-fill"></div></div>
+                <div id="spl-status-txt" class="spl-status-text">Initializing</div>
+            `;
+
+            box.append(header, list, progView);
+            overlay.appendChild(box);
+            document.body.appendChild(overlay);
+
+            overlay.onclick = (e) => { if(e.target === overlay) this.closeModal(); };
+            return { overlay, list, progView };
+        },
+
+        openDownloadMenu(title, hls) {
+            if (!this.modal) this.modal = this.createModal();
+            this.resetModal();
+            this.modal.overlay.style.display = 'flex';
+            // Trigger reflow
+            setTimeout(() => this.modal.overlay.classList.add('open'), 10);
+            this.modal.list.innerHTML = '';
+
+            const videoStreams = hls.levels || [];
+            const audioStreams = hls.audioTracks || [];
+
+            // Sort highest quality first
+            videoStreams.sort((a, b) => b.height - a.height);
+
+            const addItem = (badge, mainText, subText, callback) => {
+                const item = this.el('div', 'spl-item');
+                item.innerHTML = `
+                    <div class="spl-item-left">
+                        <span class="spl-res-badge">${badge}</span>
+                        <div class="spl-item-info">
+                            <span style="font-weight:600;font-size:14px;">${mainText}</span>
+                            <span class="spl-meta">${subText}</span>
+                        </div>
+                    </div>
+                    <div style="color:var(--spl-primary);">${ICONS.download}</div>
+                `;
+                item.onclick = callback;
+                this.modal.list.appendChild(item);
+            };
+
+            if (videoStreams.length > 0) {
+                this.modal.list.appendChild(this.el('div', 'spl-section-title', 'Video Streams (No Audio)'));
+                videoStreams.forEach(v => {
+                    addItem(`${v.height}p`, `Video Stream`, `High Bitrate • .mp4`, () => {
+                        this.startDownloadProcess(`${title}_${v.height}p_video.mp4`, (cb) => DownloadLogic.downloadStream(v.url[0], cb));
+                    });
+                });
+            }
+
+            if (audioStreams.length > 0) {
+                this.modal.list.appendChild(this.el('div', 'spl-section-title', 'Audio Streams'));
+                audioStreams.forEach(a => {
+                    addItem('AUDIO', a.name, 'AAC Audio • .mp4', () => {
+                        this.startDownloadProcess(`${title}_${a.name}_audio.mp4`, (cb) => DownloadLogic.downloadStream(a.url, cb));
+                    });
+                });
+            }
+        },
+
+        startDownloadProcess(filename, downloadFn) {
+            this.modal.list.style.display = 'none';
+            this.modal.progView.style.display = 'flex';
+            const bar = this.modal.progView.querySelector('.spl-dl-bar-fill');
+            const txt = document.getElementById('spl-status-txt');
+
+            downloadFn((pct, statusText) => {
+                bar.style.width = pct + '%';
+                txt.textContent = statusText || `${Math.round(pct)}%`;
+            }).then((blob) => {
+                DownloadLogic.saveBlob(blob, filename);
+                this.closeModal();
+            }).catch(e => {
+                alert('Error: ' + e.message);
+                this.resetModal();
+            });
+        },
+
+        resetModal() {
+            if (!this.modal) return;
+            this.modal.list.style.display = 'flex';
+            this.modal.progView.style.display = 'none';
+        },
+
+        closeModal() {
+            if (this.modal) {
+                this.modal.overlay.classList.remove('open');
+                setTimeout(() => this.modal.overlay.style.display = 'none', 200);
+            }
+            this.resetModal();
+        }
+    };
+
+    /* ==========================================================================
+       5. PLAYER BUILDER
+       ========================================================================== */
+    function buildPlayer(hlsUrl, title) {
+        document.body.innerHTML = '';
+        const wrap = UI.el('div', 'spl-wrap');
+        const video = UI.el('video', 'spl-video');
+
+        // --- Structure ---
+        const centerOverlay = UI.el('div', 'spl-center-overlay');
+        const bigPlay = UI.el('div', 'spl-big-play', ICONS.play);
+        const spinner = UI.el('div', 'spl-big-play spl-spinner', ICONS.spinner);
+        centerOverlay.append(bigPlay, spinner);
+
+        const uiLayer = UI.el('div', 'spl-layer');
+        const controls = UI.el('div', 'spl-controls');
+
+        // Progress
+        const progCont = UI.el('div', 'spl-prog-container');
+        const progBg = UI.el('div', 'spl-prog-bg');
+        const progBuf = UI.el('div', 'spl-prog-buf');
+        const progFill = UI.el('div', 'spl-prog-fill');
+        progBg.append(progBuf, progFill);
+        progCont.appendChild(progBg);
+
+        // Buttons
+        const bar = UI.el('div', 'spl-bar');
+        const left = UI.el('div', 'spl-grp');
+        const right = UI.el('div', 'spl-grp');
+
+        const btnPlay = UI.el('button', 'spl-btn', ICONS.play);
+
+        // Volume Group
+        const volWrap = UI.el('div', 'spl-vol-wrap');
+        const btnVol = UI.el('button', 'spl-btn', ICONS.volumeHigh);
+        const volSlider = UI.el('input', 'spl-vol-slider');
+        volSlider.type = 'range'; volSlider.min = 0; volSlider.max = 1; volSlider.step = 0.05; volSlider.value = 1;
+        volWrap.append(btnVol, volSlider);
+
+        const timeDisp = UI.el('div', 'spl-time', '0:00 / 0:00');
+
+        const btnDL = UI.el('button', 'spl-btn', ICONS.download);
+        btnDL.title = "Download Streams";
+        const btnFS = UI.el('button', 'spl-btn', ICONS.fullscreen);
+
+        left.append(btnPlay, volWrap, timeDisp);
+        right.append(btnDL, btnFS);
+        bar.append(left, right);
+
+        controls.append(progCont, bar);
+        uiLayer.append(controls);
+        wrap.append(video, centerOverlay, uiLayer);
+        document.body.appendChild(wrap);
+
+        // --- HLS Init ---
+        let hls;
+        if (Hls.isSupported()) {
+            hls = new Hls({ enableWorker: true });
+            hls.loadSource(hlsUrl);
+            hls.attachMedia(video);
+            hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                 // Auto play if preferred, otherwise wait
+                 video.play().catch(()=>{});
+            });
+        } else video.src = hlsUrl;
+
+        // --- Logic ---
+
+        const updatePlayState = () => {
+            if (video.paused) {
+                btnPlay.innerHTML = ICONS.play;
+                bigPlay.innerHTML = ICONS.play;
+                bigPlay.style.opacity = 1;
+                bigPlay.style.transform = 'scale(1)';
+            } else {
+                btnPlay.innerHTML = ICONS.pause;
+                bigPlay.innerHTML = ICONS.pause;
+                bigPlay.style.opacity = 0;
+                bigPlay.style.transform = 'scale(1.5)';
+            }
+        };
+
+        const togglePlay = () => {
+            if(video.paused) video.play();
+            else video.pause();
+        };
+
+        btnPlay.onclick = togglePlay;
+        centerOverlay.onclick = (e) => {
+            if(e.target === centerOverlay || e.target === bigPlay) togglePlay();
+        };
+
+        video.onplay = updatePlayState;
+        video.onpause = updatePlayState;
+        video.onwaiting = () => { spinner.style.display = 'flex'; bigPlay.style.display = 'none'; };
+        video.onplaying = () => { spinner.style.display = 'none'; bigPlay.style.display = 'flex'; updatePlayState(); };
+
+        // Volume
+        const updateVolume = () => {
+            video.volume = volSlider.value;
+            if(video.volume === 0) btnVol.innerHTML = ICONS.volumeMute;
+            else btnVol.innerHTML = ICONS.volumeHigh;
+        };
+        volSlider.oninput = updateVolume;
+        btnVol.onclick = () => {
+            if (video.volume > 0) {
+                video.dataset.prevVol = video.volume;
+                video.volume = 0;
+                volSlider.value = 0;
+            } else {
+                video.volume = video.dataset.prevVol || 1;
+                volSlider.value = video.volume;
+            }
+            updateVolume();
+        };
+
+        // Time & Progress
+        video.ontimeupdate = () => {
+            const pct = (video.currentTime / video.duration) * 100;
+            progFill.style.width = pct + '%';
+            timeDisp.textContent = `${formatTime(video.currentTime)} / ${formatTime(video.duration)}`;
+
+            // Buffer
+            if (video.buffered.length) {
+                const bufEnd = video.buffered.end(video.buffered.length - 1);
+                const bufPct = (bufEnd / video.duration) * 100;
+                progBuf.style.width = bufPct + '%';
+            }
+        };
+
+        progCont.onclick = (e) => {
+            const rect = progCont.getBoundingClientRect();
+            const pos = (e.clientX - rect.left) / rect.width;
+            video.currentTime = pos * video.duration;
+        };
+
+        // Fullscreen
+        btnFS.onclick = () => {
+            if(!document.fullscreenElement) wrap.requestFullscreen();
+            else document.exitFullscreen();
+        };
+
+        // Download
+        btnDL.onclick = () => {
+            video.pause();
+            if (!hls || !hls.levels) return alert("Stream data not ready.");
+            UI.openDownloadMenu(title, hls);
+        };
+
+        // UI Hiding
+        let timer;
+        const showUI = () => {
+            uiLayer.classList.remove('fade-out');
+            wrap.style.cursor = 'default';
+            clearTimeout(timer);
+            if(!video.paused) timer = setTimeout(() => {
+                uiLayer.classList.add('fade-out');
+                wrap.style.cursor = 'none';
+            }, 2500);
+        };
+        wrap.onmousemove = showUI;
+        wrap.onclick = showUI;
+
+        // Keyboard Shortcuts
+        document.addEventListener('keydown', (e) => {
+            // Prevent page scrolling
+            if(["Space","ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].indexOf(e.code) > -1) {
+                e.preventDefault();
+            }
+
+            switch(e.code) {
+                case 'Space': togglePlay(); showUI(); break;
+                case 'ArrowRight': video.currentTime += 5; showUI(); break;
+                case 'ArrowLeft': video.currentTime -= 5; showUI(); break;
+                case 'ArrowUp':
+                    video.volume = Math.min(1, video.volume + 0.1);
+                    volSlider.value = video.volume;
+                    updateVolume();
+                    showUI();
+                    break;
+                case 'ArrowDown':
+                    video.volume = Math.max(0, video.volume - 0.1);
+                    volSlider.value = video.volume;
+                    updateVolume();
+                    showUI();
+                    break;
+                case 'KeyF': btnFS.click(); break;
+            }
         });
     }
 
-    // Cleanup on page unload
-    window.addEventListener('beforeunload', () => {
-        // Cancel any active downloads
-        if (app.hlsManager) {
-            for (const [id] of app.hlsManager.activeDownloads) {
-                app.hlsManager.cancelDownload(id);
-            }
+    /* ==========================================================================
+       6. BOOTSTRAP
+       ========================================================================== */
+    async function init() {
+        const videoId = extractVimeoVideoId(location.pathname);
+        if (!videoId) return;
+
+        // Nice Loading Screen
+        document.documentElement.style.background = '#121212';
+        document.body.innerHTML = `
+            <div style="color:#fff;display:flex;flex-direction:column;height:100vh;justify-content:center;align-items:center;font-family:sans-serif;gap:15px;">
+                <div style="width:30px;height:30px;border:3px solid rgba(255,255,255,0.1);border-top-color:#00adef;border-radius:50%;animation:spl-spin 1s infinite linear;"></div>
+                <div style="opacity:0.7;font-size:14px;">Loading Stream...</div>
+            </div>
+            <style>@keyframes spl-spin { to { transform: rotate(360deg); } }</style>
+        `;
+
+        try {
+            const playerPageHtml = await DownloadLogic.fetch(`https://player.vimeo.com/video/${videoId}`, 'text');
+            const cfg = extractVimeoConfig(playerPageHtml);
+            if (!cfg) throw new Error('Could not parse Vimeo config.');
+
+            const hlsConfig = cfg.request.files.hls;
+            const masterUrl = hlsConfig.cdns[hlsConfig.default_cdn].url;
+            const title = (cfg.video.title || `vimeo-${videoId}`).replace(/[^a-z0-9]/gi, '_');
+
+            buildPlayer(masterUrl, title);
+
+        } catch (e) {
+            document.body.innerHTML = `<div style="color:#ff4444; padding: 40px; text-align: center; font-family:sans-serif;">
+                <h3>Unable to Load Video</h3>
+                <p style="color:#888;">${e.message}</p>
+                <button onclick="location.reload()" style="margin-top:20px;padding:8px 16px;background:#333;color:#fff;border:none;border-radius:4px;cursor:pointer;">Retry</button>
+            </div>`;
+            console.error(e);
         }
-    });
+    }
+
+    init();
 
 })();

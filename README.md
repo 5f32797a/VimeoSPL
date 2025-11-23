@@ -1,160 +1,105 @@
-# SPL (SimplePatreonLoader) - Optimized 🚀
+<div align="center">
 
-[![GitHub license](https://img.shields.io/github/license/5f32797a/VimeoSPL)](https://github.com/5f32797a/VimeoSPL/blob/main/LICENSE)
-[![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)](https://github.com/5f32797a/VimeoSPL/commits/main)
-[![Version](https://img.shields.io/badge/Version-3.0-blue.svg)](https://raw.githubusercontent.com/5f32797a/VimeoSPL/main/spl-vimeo-loader.js)
-[![GitHub issues](https://img.shields.io/github/issues/5f32797a/VimeoSPL)](https://github.com/5f32797a/VimeoSPL/issues)
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0077B5&height=250&section=header&text=Vimeo%20SPL&fontSize=80&fontColor=ffffff&desc=The%20Architect%20of%20Streaming&descSize=25&animation=fadeIn&fontAlignY=40&descAlignY=60" />
 
-> An enhanced and optimized userscript for loading and downloading restricted Vimeo videos. This version features a complete architectural rewrite for superior performance, reliability, and a modern user experience.
+<br/>
 
-## ✨ Key Features
+<a href="https://git.io/typing-svg">
+  <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&weight=600&size=24&pause=1000&color=00D2FF&center=true&vCenter=true&width=600&lines=Bypass+Restrictions;Unlock+High+Fidelity+Streams;Glassmorphism+Interface;v4.0+Now+Available" alt="Typing SVG" />
+</a>
 
--   **Robust Video Access**: Employs multiple extraction methods to reliably access video data, bypassing privacy and referrer-based restrictions.
--   **Modern Player Interface**: Replaces the standard restricted page with a clean, dark-themed player shell, complete with essential controls.
--   **Advanced HLS Downloader**:
-    -   Downloads and combines HLS stream segments into a single MP4 or M4A file.
-    -   Utilizes concurrent downloads to maximize speed.
-    -   Shows real-time progress with notifications.
--   **Direct MP4 Downloads**: When available, provides direct download links for MP4 files that include both video and audio.
--   **Interactive Quality Selection**:
-    -   Lets you choose from all available video resolutions (e.g., 1080p, 1440p, 4K).
-    -   Clearly indicates which streams contain audio (`✓ Audio` vs. `✗ No Audio`).
-    -   Lists separate audio-only tracks for individual download.
--   **Helpful Utilities**:
-    -   **Save HLS Stream**: Save a `.m3u8` playlist file for use in external players like VLC.
-    -   **Copy Stream URL**: Quickly copy the master playlist URL to your clipboard.
--   **Rich Notifications**: Get real-time feedback on download progress, completions, and errors.
--   **High Performance & Reliability**: Built with retry logic, timeouts, and optimized code for handling large files and flaky connections.
--   **Zero Dependencies**: Works out-of-the-box with just a userscript manager.
+<br/>
 
-## 📋 Prerequisites
+[![Version](https://img.shields.io/badge/Version-4.0-00d2ff?style=for-the-badge&logo=vimeo&logoColor=white)](https://github.com/5f32797a/VimeoSPL)
+[![License](https://img.shields.io/badge/License-MIT-0077B5?style=for-the-badge)](https://github.com/5f32797a/VimeoSPL/blob/main/LICENSE)
+[![Maintenance](https://img.shields.io/badge/Maintained-Yes-004E7A?style=for-the-badge)](https://github.com/5f32797a/VimeoSPL/commits/main)
 
-You'll need a modern web browser and a userscript manager.
+<br/>
 
-| Manager                                                   | Status            | Recommendation                               |
-| --------------------------------------------------------- | ----------------- | -------------------------------------------- |
-| [Violentmonkey](https://violentmonkey.github.io/)         | ✅ **Recommended**  | Excellent compatibility across all browsers. |
-| [Tampermonkey](https://www.tampermonkey.net/)             | ✅ Supported      | A popular and solid alternative.             |
-| Greasemonkey                                              | ❌ Not Recommended | May have compatibility issues.               |
+> **"Experience the stream as it was meant to be seen."**
+> <br/> A sophisticated userscript that injects a high-performance HLS player into restricted Vimeo & Patreon embeds.
 
-## 💻 Installation
-
-1.  **Install a Userscript Manager** (if you don't have one):
-    -   **Chrome/Edge/Brave**: [Violentmonkey](https://chromewebstore.google.com/detail/violentmonkey/jinjaccalgkegednnccohejagnlnfdag) or [Tampermonkey](https://chrome.google.com/webstore/detail/tampermonkey/dhdgffkkebhmkfjojejmpbldmpobfkfo)
-    -   **Firefox**: [Violentmonkey](https://addons.mozilla.org/en-US/firefox/addon/violentmonkey/) or [Tampermonkey](https://addons.mozilla.org/en-US/firefox/addon/tampermonkey/)
-
-2.  **Install the Script**:
-    -   Click the link below to install directly:
-        <br/><br/>
-        ➡️ **[Install SPL v3.0](https://raw.githubusercontent.com/5f32797a/VimeoSPL/main/spl-vimeo-loader.js)**
-        <br/><br/>
-    -   Your userscript manager will open a new tab. Simply click **"Install"** or **"Confirm Installation"**.
-
-3.  **You're ready!** The script is now active.
-
-## 🎮 How to Use
-
-The script works automatically.
-
-1.  **Load a Video**: Navigate to any restricted Vimeo video URL. The script will take over the page, bypass restrictions, and load a custom player interface.
-
-2.  **Download a Video**:
-    -   In the player controls at the top, click the **`⬇ Download`** button.
-    -   A dropdown menu will appear with several options:
-        -   **`🎬 Download Video (HLS)`**: This is the most powerful option. It opens a dialog where you can select from all available video and audio qualities.
-        -   **`📹 Direct MP4 Downloads`**: If available, this opens a simpler dialog to download a complete MP4 file directly.
-        -   **`📄 Save HLS Stream`**: Saves a `.m3u8` file. Open this with a media player like VLC to stream the video directly.
-        -   **`📋 Copy Stream URL`**: Copies the HLS stream URL to your clipboard.
-
-3.  **Track Progress**: A notification will appear in the bottom-right corner, showing you the real-time download progress, speed, and final status.
-
-### User Flow Diagram
-
-```mermaid
-graph TD
-    subgraph "Loading"
-        A[Navigate to Restricted Vimeo Page] --> B{Script Auto-Runs};
-        B --> C[Replaces Page with Custom Player UI];
-    end
-
-    subgraph "Interaction"
-        C --> D{Click '⬇ Download'};
-        D --> E[Dropdown Menu Appears];
-    end
-
-    subgraph "Download Paths"
-        E --> F["🎬 Download Video (HLS)"];
-        E --> G["📹 Direct MP4 Downloads"];
-        E --> H["📄 Save HLS Stream (.m3u8)"];
-        E --> I["📋 Copy Stream URL"];
-    end
-
-    subgraph "HLS Path"
-        F --> J[Quality Selection Dialog];
-        J --> K{Choose Video Quality};
-        J --> L{Choose Audio-Only Track};
-        K --> M[Downloads & Combines Segments];
-        L --> M;
-    end
-
-    subgraph "MP4 Path"
-        G --> N[MP4 Quality Dialog];
-        N --> O{Choose MP4 Quality};
-        O --> P[Directly Downloads Single MP4 File];
-    end
-
-    subgraph "Completion"
-        M --> Q[Save as .mp4/.m4a File];
-        P --> Q;
-        Q --> R["✅ Download Complete!"];
-    end
-
-    style C fill:#2c3e50,stroke:#3498db,stroke-width:2px,color:#fff
-    style D fill:#3498db,stroke:#2980b9,stroke-width:2px,color:#fff
-    style R fill:#27ae60,stroke:#2ecc71,stroke-width:2px,color:#fff
-```
-
-## 🔄 What's New in v3.0
-
-Version 3.0 is a ground-up rewrite, introducing major improvements across the board.
-
--   **New Architecture**: Re-engineered with modern JavaScript classes (`UIManager`, `HLSManager`, `VideoExtractor`) for better maintainability and performance.
--   **Revamped UI/UX**: A polished, intuitive, and fully custom user interface that replaces the entire Vimeo page.
--   **Enhanced Downloader**: The HLS downloader is now more robust, faster with concurrent segment fetching, and provides clear progress.
--   **Direct MP4 Downloads Re-introduced**: The ability to download single-file MP4s is back and better than ever.
--   **Audio-Aware Quality Selection**: The new quality dialog intelligently informs you if a video stream includes audio, solving a common point of confusion.
--   **Separate Audio Tracks**: Easily download just the audio from a video.
--   **Advanced Error Handling**: The script is more resilient to network errors and platform changes, with built-in retry logic.
--   **Optimized Performance**: From initial load to final download, every step has been optimized for speed and efficiency.
-
-## 🔧 Browser Compatibility
-
-The script has been tested and confirmed to work on the latest versions of the following browsers:
-
--   ✅ Google Chrome
--   ✅ Mozilla Firefox
--   ✅ Microsoft Edge
--   ✅ Brave Browser
--   ✅ Kiwi Browser (Android)
-
-## ⚠️ Disclaimer
-
-This script is provided for personal and educational use only. It is offered "as is" without any warranty. The functionality depends on Vimeo's current platform structure, which may change at any time. Please respect the copyright and privacy settings of content creators.
-
-## 🤝 Contributing & Support
-
-Your feedback and contributions are welcome!
-
--   **Report a Bug**: If you find an issue, please [create a new issue](https://github.com/5f32797a/VimeoSPL/issues) with as much detail as possible (video URL, browser version, etc.).
--   **Suggest an Enhancement**: Have an idea for a new feature? Let us know!
--   **Submit a Pull Request**: Code contributions are highly appreciated.
+</div>
 
 ---
 
+## 💠 Core Architecture
+
+VimeoSPL v4.0 is rebuilt from the ground up to prioritize **stability** and **aesthetics**.
+
+| Component | Status | Description |
+| :--- | :---: | :--- |
+| **Visual Core** | 🎨 | **Glassmorphism UI**: Blur backdrops (`backdrop-filter`), smooth fade transitions, and a deep blue dark mode. |
+| **Access Node** | 🔓 | **Header Injection**: Bypasses privacy settings by emulating valid referrer headers. |
+| **Download Engine** | 🚀 | **Separate Streams**: Downloads Raw Video (`.mp4`) and Audio (`.mp4`) independently for 100% success rate. |
+| **Input System** | ⌨️ | **Keyboard Driven**: Full hotkey support for power users (Seek, Volume, Fullscreen). |
+
+---
+
+## ⚡ Installation Protocol
+
+### 1. Initialize Environment
+You need a userscript manager to inject the core.
+
+| Browser | Recommended Agent |
+| :--- | :--- |
+| **Chrome / Brave** | [Violentmonkey](https://chromewebstore.google.com/detail/violentmonkey/jinjaccalgkegednnccohejagnlnfdag) |
+| **Firefox** | [Violentmonkey](https://addons.mozilla.org/en-US/firefox/addon/violentmonkey/) |
+
+### 2. Deploy Script
+Click the terminal button below to install directly.
+
 <div align="center">
-  
-**SPL - The Ultimate Vimeo Video Loader & Downloader**
+  <br/>
+  <a href="https://github.com/5f32797a/VimeoSPL/raw/main/vimeo-spl.user.js">
+    <img src="https://img.shields.io/badge/INITIALIZE_SPL_v4.0-0077B5?style=for-the-badge&logo=tampermonkey&logoColor=white&labelColor=004E7A" height="60">
+  </a>
+  <br/><br/>
+</div>
 
-[⭐ Star this Repo](https://github.com/5f32797a/VimeoSPL) | [📝 Report a Bug](https://github.com/5f32797a/VimeoSPL/issues)
+---
 
+## 🎮 Interface & Controls
+
+The UI is designed to disappear when you don't need it and provide granular control when you do.
+
+| Command | Key / Action |
+| :--- | :--- |
+| **Playback** | <kbd>Space</kbd> or Click Center |
+| **Fullscreen** | <kbd>F</kbd> |
+| **Seek** | <kbd>←</kbd> / <kbd>→</kbd> (5s increments) |
+| **Volume** | <kbd>↑</kbd> / <kbd>↓</kbd> or Hover Slider |
+| **Download** | Click <kbd>⬇</kbd> Icon in Bar |
+
+---
+
+## 📥 Stream Extraction Logic
+
+To ensure maximum quality and zero corruption, we do not mux in the browser.
+
+```mermaid
+graph TD
+    A[User Initiates Download] --> B{Select Target}
+    B -->|High Quality| C[Video Stream .mp4]
+    B -->|AAC Audio| D[Audio Stream .mp4]
+    C --> E[Save to Disk]
+    D --> E
+    E --> F[Merge via VLC / FFmpeg]
+    
+    style A fill:#0077B5,color:white,stroke:#00d2ff
+    style C fill:#004E7A,color:white,stroke:none
+    style D fill:#004E7A,color:white,stroke:none
+    style F fill:#00d2ff,color:black,stroke:none
+```
+
+> **Note:** Browser-based merging is unstable for large 4K files. Downloading streams separately guarantees you get the raw data directly from the CDN.
+
+---
+
+## 🛡️ Disclaimer
+
+> This tool is engineered for **educational purposes** and personal archiving of content you legally access. The code interacts with Vimeo's player API and HLS manifests.
+
+<div align="center">
+  <img src="https://capsule-render.vercel.app/api?type=waving&color=0077B5&height=100&section=footer"/>
 </div>
