@@ -51,7 +51,7 @@ Click the terminal button below to install directly.
 
 <div align="center">
   <br/>
-  <a href="https://github.com/5f32797a/VimeoSPL/raw/main/vimeo-spl.user.js">
+  <a href="https://github.com/5f32797a/VimeoSPL/raw/main/spl-vimeo-loader.js">
     <img src="https://img.shields.io/badge/INITIALIZE_SPL_v4.0-0077B5?style=for-the-badge&logo=tampermonkey&logoColor=white&labelColor=004E7A" height="60">
   </a>
   <br/><br/>
@@ -102,4 +102,5 @@ graph TD
 
 <div align="center">
   <img src="https://capsule-render.vercel.app/api?type=waving&color=0077B5&height=100&section=footer"/>
+
 </div>
