@@ -52,7 +52,10 @@ Click the terminal button below to install directly.
 <div align="center">
   <br/>
   <a href="https://github.com/5f32797a/VimeoSPL/raw/main/spl-vimeo-loader.js">
-    <img src="https://img.shields.io/badge/INITIALIZE_SPL_v4.0-0077B5?style=for-the-badge&logo=tampermonkey&logoColor=white&labelColor=004E7A" height="60">
+    <img src="https://img.shields.io/badge/INSTALL_GITHUB-0077B5?style=for-the-badge&logo=github&logoColor=white&labelColor=004E7A" height="50">
+  </a>
+  <a href="https://greasyfork.org/en/scripts/559430-vimeo-spl-v4-1-modern-ui">
+    <img src="https://img.shields.io/badge/INSTALL_GREASYFORK-bf202f?style=for-the-badge&logo=greasyfork&logoColor=white&labelColor=8f1823" height="50">
   </a>
   <br/><br/>
 </div>

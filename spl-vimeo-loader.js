@@ -1,13 +1,16 @@
 // ==UserScript==
-// @name         Vimeo SPL: v4.0 (Modern UI)
+// @name         Vimeo SPL: v4.1 (Modern UI)
 // @namespace    https://github.com/5f32797a
-// @version      4.0
+// @version      4.1
 // @description  VimeoSPL: Replaces embedded player with a modern HLS interface, allowing separate high-quality video/audio downloads.
 // @match        https://vimeo.com/*
 // @match        https://player.vimeo.com/*
 // @grant        GM_xmlhttpRequest
-// @require      https://cdn.jsdelivr.net/npm/hls.js@latest
+// @require      https://cdnjs.cloudflare.com/ajax/libs/hls.js/1.5.17/hls.min.js
 // @run-at       document-idle
+// @updateURL    https://github.com/5f32797a/VimeoSPL/raw/main/spl-vimeo-loader.js
+// @downloadURL  https://github.com/5f32797a/VimeoSPL/raw/main/spl-vimeo-loader.js
+// @license MIT
 // ==/UserScript==
 
 (function () {
@@ -504,7 +507,14 @@
        6. BOOTSTRAP
        ========================================================================== */
     async function init() {
-        const videoId = extractVimeoVideoId(location.pathname);
+        // Clean URL if it has a hash suffix (e.g. /12345/abcde -> /12345)
+        const hashMatch = location.pathname.match(/^\/(\d+)\/([a-zA-Z0-9]+)$/);
+        if (hashMatch) {
+            const cleanPath = `/${hashMatch[1]}`;
+            window.history.replaceState(null, '', cleanPath);
+        }
+
+        const videoId = hashMatch ? hashMatch[1] : extractVimeoVideoId(location.pathname);
         if (!videoId) return;
 
         // Nice Loading Screen
